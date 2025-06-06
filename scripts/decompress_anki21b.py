@@ -6,8 +6,9 @@ import sqlite3
 try:
     import zstandard as zstd
     
-    # Path to the compressed file
-    file_path = '../visualizations/Core_2K_unzipped/collection.anki21b'
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = os.path.dirname(script_dir)
+    file_path = os.path.join(project_dir, 'data', 'Core_2K_unzipped', 'collection.anki21b')
     
     print(f"Attempting to decompress: {file_path}")
     
@@ -22,7 +23,8 @@ try:
     start_time = time.time()
     try:
         # Use a streaming decompressor to handle potentially large files
-        with open('../data/decompressed_anki21b.db', 'wb') as fout:
+        output_path = os.path.join(project_dir, 'data', 'decompressed_anki21b.db')
+        with open(output_path, 'wb') as fout:
             with dctx.stream_reader(compressed_data) as reader:
                 while True:
                     chunk = reader.read(16384)  # 16KB chunks
@@ -35,11 +37,11 @@ try:
                         print("Decompression taking too long, might be stuck.")
                         break
         
-        print("Decompression complete. Saved to: ../data/decompressed_anki21b.db")
+        print(f"Decompression complete. Saved to: {output_path}")
         
         # Try to open as SQLite database
         try:
-            conn = sqlite3.connect('../data/decompressed_anki21b.db')
+            conn = sqlite3.connect(output_path)
             cursor = conn.cursor()
             
             # Get table names
@@ -67,7 +69,7 @@ try:
             print(f"Not a valid SQLite database: {e}")
             
             # Try to interpret as JSON or plain text
-            with open('../data/decompressed_anki21b.db', 'rb') as f:
+            with open(output_path, 'rb') as f:
                 data = f.read()
                 
             try:
