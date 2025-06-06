@@ -31,7 +31,7 @@ def get_learning_progression():
             COUNT(*) as review_count,
             AVG(r.time) as avg_time
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY review_date, r.type
         ORDER BY review_date
     """)
@@ -115,7 +115,7 @@ def get_time_efficiency():
             AVG(r.time)/1000.0 as avg_seconds,
             SUM(CASE WHEN r.ease >= 3 THEN 1 ELSE 0 END) * 100.0 / COUNT(*) as success_rate
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY review_date
         HAVING reviews_per_day >= 5  -- Only days with meaningful study
         ORDER BY review_date
@@ -287,7 +287,7 @@ def create_advanced_visualizations():
             COUNT(CASE WHEN r.type = 1 THEN 1 END) as reviewed,
             COUNT(CASE WHEN r.type = 2 THEN 1 END) as relearned
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY review_date
         ORDER BY review_date
     """)
@@ -388,7 +388,7 @@ def create_advanced_visualizations():
             AVG(r.time)/1000.0 as avg_seconds,
             SUM(r.time)/1000.0/60.0 as total_minutes
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY CAST(strftime('%w', date(r.id/1000, 'unixepoch')) AS INTEGER)
         ORDER BY CAST(strftime('%w', date(r.id/1000, 'unixepoch')) AS INTEGER)
     """)
@@ -427,7 +427,7 @@ def create_advanced_visualizations():
             SUM(CASE WHEN r.ease >= 3 THEN 1 ELSE 0 END) as daily_success,
             COUNT(*) as daily_total
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY review_date
         ORDER BY review_date
     """)

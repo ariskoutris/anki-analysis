@@ -71,7 +71,7 @@ def create_learning_insights():
             AVG(CASE WHEN r.ease >= 3 THEN 1.0 ELSE 0.0 END) * 100 as success_rate,
             COUNT(*) as review_count
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY hour
         HAVING review_count >= 10
         ORDER BY hour
@@ -144,7 +144,7 @@ def create_learning_insights():
             COUNT(*) as daily_reviews,
             SUM(CASE WHEN r.ease >= 3 THEN 1 ELSE 0 END) as daily_success
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY review_date
         ORDER BY review_date
     """)
@@ -243,7 +243,7 @@ def create_learning_insights():
             AVG(r.time)/1000.0 as avg_time_per_card,
             SUM(r.time)/1000.0/60.0 as total_session_minutes
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY study_date
         HAVING session_size >= 5
         ORDER BY study_date

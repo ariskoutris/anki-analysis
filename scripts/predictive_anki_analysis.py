@@ -104,7 +104,7 @@ def create_predictive_analysis():
             AVG(CASE WHEN r.ease >= 3 THEN 1.0 ELSE 0.0 END) as success_rate,
             COUNT(*) as review_count
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY hour
         HAVING review_count >= 5
         ORDER BY hour
@@ -199,7 +199,7 @@ def create_predictive_analysis():
             SUM(CASE WHEN r.ease >= 3 THEN 1 ELSE 0 END) as daily_success,
             AVG(r.time)/1000.0 as avg_time
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY review_date
         HAVING daily_reviews >= 5
         ORDER BY review_date
@@ -268,7 +268,7 @@ def create_study_recommendations():
             AVG(r.time)/1000.0 as avg_time,
             COUNT(*) as review_count
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY hour
         HAVING review_count >= 10
         ORDER BY (success_rate / avg_time) DESC
@@ -338,7 +338,7 @@ def create_study_recommendations():
             AVG(r.time)/1000.0 as avg_time,
             COUNT(*) as total_reviews
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
     """)
     
     performance = cursor.fetchone()

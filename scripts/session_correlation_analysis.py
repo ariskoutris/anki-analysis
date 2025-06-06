@@ -50,7 +50,7 @@ def extract_session_statistics():
             MIN(r.id/1000) as session_start_timestamp,
             MAX(r.id/1000) as session_end_timestamp
         FROM revlog r
-        WHERE r.id > 0
+        WHERE r.id > 0 AND r.type != 4  -- Exclude manual reschedules (type 4)
         GROUP BY session_date
         HAVING total_cards >= 5  -- Only meaningful study sessions
         ORDER BY session_date
