@@ -1,8 +1,9 @@
 import sqlite3
 import os
 
-# We'll use collection.anki2 directly since it's a standard SQLite database
-db_path = os.path.join('../data/Core_2K_unzipped', 'collection.anki2')
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_dir = os.path.dirname(script_dir)
+db_path = os.path.join(project_dir, 'data', 'decompressed_anki21b.db')
 print(f"Trying to connect to: {db_path}")
 
 conn = sqlite3.connect(db_path)
