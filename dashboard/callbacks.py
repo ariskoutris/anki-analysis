@@ -15,24 +15,17 @@ from .charts_session import (
     create_hourly_chart,
     create_success_rate_chart,
     create_efficiency_chart,
-    create_time_per_card_chart,
-    create_session_scatter_chart,
     create_memory_decay_chart,
     create_future_load_chart,
-    create_daily_load_contribution_chart,
-    create_load_contribution_distribution_chart,
 )
 from .charts_card import (
     create_memory_state_chart,
     create_retrievability_distribution_chart,
     create_stability_distribution_chart,
     create_difficulty_distribution_chart,
-    create_stability_retrievability_chart,
-    create_difficulty_retrievability_chart,
     create_lapses_chart,
     create_reviews_stability_chart,
-    create_time_spent_chart,
-    create_reviews_distribution_chart,
+    create_leech_chart,
 )
 from .data_loader import (
     get_session_data,
@@ -40,9 +33,12 @@ from .data_loader import (
     get_daily_reviews,
     get_review_intervals,
     get_card_data,
-    get_total_time_per_card,
     get_overview_stats,
     get_memory_state_summary,
+    get_session_summary_stats,
+    get_workload_summary,
+    get_knowledge_health_stats,
+    get_leech_candidates,
 )
 from anki_config import (
     get_active_date,
@@ -374,7 +370,14 @@ def auto_dismiss_upload_message(n):
 # ---------------------------------------------------------------------------
 
 @callback(
-    Output('session-charts', 'children'),
+    [
+        Output('session-volume-summary', 'children'),
+        Output('session-volume-charts', 'children'),
+        Output('session-effectiveness-summary', 'children'),
+        Output('session-effectiveness-charts', 'children'),
+        Output('session-workload-summary', 'children'),
+        Output('session-workload-charts', 'children'),
+    ],
     [Input('session-time-range', 'value'),
      Input('xaxis-mode', 'data'),
      Input('data-folder-dropdown', 'value')],
@@ -398,59 +401,75 @@ def update_session_charts(time_range, xaxis_mode, selected_date, ui_store):
     daily_df = get_daily_reviews(review_days, year_filter)
     interval_df = get_review_intervals(review_days, year_filter)
 
+    empty_msg = html.Div("No session data available for the selected time range.",
+                        style={'textAlign': 'center', 'padding': '30px', 'color': '#666'})
+
     if session_df.empty:
-        return html.Div("No session data available for the selected time range.",
-                       style={'textAlign': 'center', 'padding': '50px', 'color': '#666'})
+        return empty_msg, [], empty_msg, [], empty_msg, []
 
-    charts = []
+    # Get summary statistics
+    session_stats = get_session_summary_stats(review_days, year_filter)
+    workload_stats = get_workload_summary()
 
-    # Row 1: Session Overview
-    charts.append(html.Div([
+    # Section 1: Study Volume & Consistency
+    volume_summary = html.Div([
+        html.Div([
+            create_stat_card(f"{session_stats['weekly_velocity']:.0f}", "Avg Daily Reviews", COLORS['primary']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(f"{session_stats['current_streak']}", "Current Streak", COLORS['success']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(
+                f"{session_stats['best_hour']}:00" if session_stats['best_hour'] is not None else "N/A",
+                "Best Study Hour",
+                COLORS['info']
+            ),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+    ], style={'display': 'flex', 'marginBottom': '16px'})
+
+    volume_charts = html.Div([
         html.Div([
             dcc.Graph(
-                id='daily-reviews-graph',
                 figure=create_daily_reviews_chart(daily_df, use_sessions=use_sessions),
                 config={'displayModeBar': False}
             )
         ], style={'flex': '2', 'padding': '0 10px'}),
         html.Div([
             dcc.Graph(
-                id='hourly-chart',
                 figure=create_hourly_chart(hourly_df),
                 config={'displayModeBar': False}
             )
         ], style={'flex': '1', 'padding': '0 10px'}),
-    ], style={'display': 'flex', 'marginBottom': '20px'}))
+    ], style={'display': 'flex'})
 
-    # Row 2: Performance Metrics
-    charts.append(html.Div([
+    # Section 2: Learning Effectiveness
+    trend_indicator = "↑" if session_stats['trend'] == 'up' else ("↓" if session_stats['trend'] == 'down' else "→")
+    trend_color = COLORS['success'] if session_stats['trend'] == 'up' else (COLORS['danger'] if session_stats['trend'] == 'down' else COLORS['info'])
+
+    effectiveness_summary = html.Div([
+        html.Div([
+            create_stat_card(f"{session_stats['avg_success_rate']:.0f}%", "Avg Success Rate",
+                           COLORS['success'] if session_stats['avg_success_rate'] >= 85 else COLORS['warning']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(trend_indicator, "Trend (vs last week)", trend_color),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(f"{session_stats['avg_session_size']:.0f}", "Avg Session Size", COLORS['primary']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+    ], style={'display': 'flex', 'marginBottom': '16px'})
+
+    effectiveness_charts = html.Div([
         html.Div([
             dcc.Graph(
-                id='success-rate-chart',
                 figure=create_success_rate_chart(session_df, use_sessions=use_sessions),
                 config={'displayModeBar': False}
             )
         ], style={'flex': '1', 'padding': '0 10px'}),
         html.Div([
             dcc.Graph(
-                id='efficiency-chart',
                 figure=create_efficiency_chart(session_df, use_sessions=use_sessions),
-                config={'displayModeBar': False}
-            )
-        ], style={'flex': '1', 'padding': '0 10px'}),
-    ], style={'display': 'flex', 'marginBottom': '20px'}))
-
-    # Row 3: Time Analysis
-    charts.append(html.Div([
-        html.Div([
-            dcc.Graph(
-                figure=create_time_per_card_chart(session_df),
-                config={'displayModeBar': False}
-            )
-        ], style={'flex': '1', 'padding': '0 10px'}),
-        html.Div([
-            dcc.Graph(
-                figure=create_session_scatter_chart(session_df),
                 config={'displayModeBar': False}
             )
         ], style={'flex': '1', 'padding': '0 10px'}),
@@ -460,35 +479,38 @@ def update_session_charts(time_range, xaxis_mode, selected_date, ui_store):
                 config={'displayModeBar': False}
             )
         ], style={'flex': '1', 'padding': '0 10px'}),
-    ], style={'display': 'flex', 'marginBottom': '20px'}))
+    ], style={'display': 'flex'})
 
-    # Row 4: Load Analysis
-    charts.append(html.Div([
+    # Section 3: Workload Forecast
+    peak_day_str = workload_stats['peak_day'].strftime('%b %d') if workload_stats['peak_day'] else "N/A"
+
+    workload_summary = html.Div([
+        html.Div([
+            create_stat_card(f"{workload_stats['due_this_week']}", "Due This Week", COLORS['primary']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(f"{workload_stats['overdue_cards']}", "Overdue Cards",
+                           COLORS['danger'] if workload_stats['overdue_cards'] > 0 else COLORS['success']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(f"{peak_day_str} ({workload_stats['peak_day_count']})", "Peak Day Ahead", COLORS['warning']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+    ], style={'display': 'flex', 'marginBottom': '16px'})
+
+    workload_charts = html.Div([
         html.Div([
             dcc.Graph(
                 figure=create_future_load_chart(60),
                 config={'displayModeBar': False}
             )
-        ], style={'flex': '2', 'padding': '0 10px'}),
-        html.Div([
-            dcc.Graph(
-                figure=create_daily_load_contribution_chart(),
-                config={'displayModeBar': False}
-            )
         ], style={'flex': '1', 'padding': '0 10px'}),
-    ], style={'display': 'flex', 'marginBottom': '20px'}))
+    ], style={'display': 'flex'})
 
-    # Row 5: Load Distribution & Performance
-    charts.append(html.Div([
-        html.Div([
-            dcc.Graph(
-                figure=create_load_contribution_distribution_chart(),
-                config={'displayModeBar': False}
-            )
-        ], style={'flex': '1', 'padding': '0 10px'}),
-    ], style={'display': 'flex', 'marginBottom': '20px'}))
-
-    return charts
+    return (
+        volume_summary, volume_charts,
+        effectiveness_summary, effectiveness_charts,
+        workload_summary, workload_charts
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +518,14 @@ def update_session_charts(time_range, xaxis_mode, selected_date, ui_store):
 # ---------------------------------------------------------------------------
 
 @callback(
-    Output('card-charts', 'children'),
+    [
+        Output('card-knowledge-summary', 'children'),
+        Output('card-knowledge-charts', 'children'),
+        Output('card-maturity-summary', 'children'),
+        Output('card-maturity-charts', 'children'),
+        Output('card-problem-summary', 'children'),
+        Output('card-problem-charts', 'children'),
+    ],
     [Input('retrievability-filter', 'value'),
      Input('difficulty-filter', 'value'),
      Input('data-folder-dropdown', 'value')],
@@ -513,11 +542,12 @@ def update_card_charts(ret_range, diff_range, selected_date, ui_store):
             set_active_date(dates[0])
 
     cards_df = get_card_data()
-    time_df = get_total_time_per_card()
+
+    empty_msg = html.Div("No card data available.",
+                        style={'textAlign': 'center', 'padding': '30px', 'color': '#666'})
 
     if cards_df.empty:
-        return html.Div("No card data available.",
-                       style={'textAlign': 'center', 'padding': '50px', 'color': '#666'})
+        return empty_msg, [], empty_msg, [], empty_msg, []
 
     # Apply filters
     mask = (
@@ -528,30 +558,26 @@ def update_card_charts(ret_range, diff_range, selected_date, ui_store):
     )
     filtered_df = cards_df[mask]
 
-    # Summary stats for filtered cards
-    summary = html.Div([
-        html.Div([
-            create_stat_card(f"{len(filtered_df):,}", "Cards Shown", COLORS['primary']),
-        ], style={'flex': '1', 'padding': '0 10px'}),
-        html.Div([
-            create_stat_card(f"{filtered_df['retrievability'].mean():.0f}%", "Avg Retrievability",
-                           COLORS['success'] if filtered_df['retrievability'].mean() >= 80 else COLORS['warning']),
-        ], style={'flex': '1', 'padding': '0 10px'}),
-        html.Div([
-            create_stat_card(f"{filtered_df['difficulty'].mean():.1f}", "Avg Difficulty"),
-        ], style={'flex': '1', 'padding': '0 10px'}),
-        html.Div([
-            create_stat_card(f"{filtered_df['stability'].median():.0f}d", "Median Stability"),
-        ], style={'flex': '1', 'padding': '0 10px'}),
-        html.Div([
-            create_stat_card(f"{filtered_df['lapses'].sum():,}", "Total Lapses", COLORS['danger']),
-        ], style={'flex': '1', 'padding': '0 10px'}),
-    ], style={'display': 'flex', 'marginBottom': '20px'})
+    # Get summary statistics
+    health_stats = get_knowledge_health_stats()
+    leech_df = get_leech_candidates()
 
-    charts = [summary]
+    # Section 1: Current Knowledge State
+    knowledge_summary = html.Div([
+        html.Div([
+            create_stat_card(f"{health_stats['health_score']:.0f}%", "Health Score",
+                           COLORS['success'] if health_stats['health_score'] >= 70 else COLORS['warning']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(f"{health_stats['cards_needing_attention']}", "Need Attention",
+                           COLORS['danger'] if health_stats['cards_needing_attention'] > 10 else COLORS['warning']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(f"{health_stats['median_retrievability']:.0f}%", "Median Retrievability", COLORS['info']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+    ], style={'display': 'flex', 'marginBottom': '16px'})
 
-    # Row 1: Memory State & Distribution
-    charts.append(html.Div([
+    knowledge_charts = html.Div([
         html.Div([
             dcc.Graph(
                 figure=create_memory_state_chart(cards_df),
@@ -564,6 +590,22 @@ def update_card_charts(ret_range, diff_range, selected_date, ui_store):
                 config={'displayModeBar': False}
             )
         ], style={'flex': '1', 'padding': '0 10px'}),
+    ], style={'display': 'flex'})
+
+    # Section 2: Collection Maturity
+    maturity_summary = html.Div([
+        html.Div([
+            create_stat_card(f"{health_stats['avg_stability']:.0f}d", "Avg Stability", COLORS['primary']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(f"{health_stats['mature_cards_pct']:.0f}%", "Mature Cards (>30d)", COLORS['success']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(f"{len(filtered_df):,}", "Cards Shown", COLORS['info']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+    ], style={'display': 'flex', 'marginBottom': '16px'})
+
+    maturity_charts = html.Div([
         html.Div([
             dcc.Graph(
                 figure=create_stability_distribution_chart(filtered_df),
@@ -576,50 +618,46 @@ def update_card_charts(ret_range, diff_range, selected_date, ui_store):
                 config={'displayModeBar': False}
             )
         ], style={'flex': '1', 'padding': '0 10px'}),
-    ], style={'display': 'flex', 'marginBottom': '20px'}))
-
-    # Row 2: Correlations
-    charts.append(html.Div([
-        html.Div([
-            dcc.Graph(
-                figure=create_stability_retrievability_chart(filtered_df),
-                config={'displayModeBar': False}
-            )
-        ], style={'flex': '1', 'padding': '0 10px'}),
-        html.Div([
-            dcc.Graph(
-                figure=create_difficulty_retrievability_chart(filtered_df),
-                config={'displayModeBar': False}
-            )
-        ], style={'flex': '1', 'padding': '0 10px'}),
-        html.Div([
-            dcc.Graph(
-                figure=create_lapses_chart(filtered_df),
-                config={'displayModeBar': False}
-            )
-        ], style={'flex': '1', 'padding': '0 10px'}),
-    ], style={'display': 'flex', 'marginBottom': '20px'}))
-
-    # Row 3: Learning Progress
-    charts.append(html.Div([
         html.Div([
             dcc.Graph(
                 figure=create_reviews_stability_chart(filtered_df),
                 config={'displayModeBar': False}
             )
         ], style={'flex': '1', 'padding': '0 10px'}),
-        html.Div([
-            dcc.Graph(
-                figure=create_time_spent_chart(time_df),
-                config={'displayModeBar': False}
-            )
-        ], style={'flex': '1', 'padding': '0 10px'}),
-        html.Div([
-            dcc.Graph(
-                figure=create_reviews_distribution_chart(filtered_df),
-                config={'displayModeBar': False}
-            )
-        ], style={'flex': '1', 'padding': '0 10px'}),
-    ], style={'display': 'flex', 'marginBottom': '20px'}))
+    ], style={'display': 'flex'})
 
-    return charts
+    # Section 3: Problem Areas
+    problem_summary = html.Div([
+        html.Div([
+            create_stat_card(f"{health_stats['leech_count']}", "Leech Cards (3+ lapses)",
+                           COLORS['danger'] if health_stats['leech_count'] > 10 else COLORS['warning']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(f"{filtered_df['lapses'].sum():,}", "Total Lapses", COLORS['danger']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            create_stat_card(f"{filtered_df['difficulty'].mean():.1f}", "Avg Difficulty", COLORS['info']),
+        ], style={'flex': '1', 'padding': '0 10px'}),
+    ], style={'display': 'flex', 'marginBottom': '16px'})
+
+    problem_charts = html.Div([
+        html.Div([
+            dcc.Graph(
+                figure=create_lapses_chart(filtered_df),
+                config={'displayModeBar': False}
+            )
+        ], style={'flex': '1', 'padding': '0 10px'}),
+        html.Div([
+            dcc.Graph(
+                figure=create_leech_chart(leech_df),
+                config={'displayModeBar': False}
+            )
+        ], style={'flex': '1', 'padding': '0 10px'}),
+    ], style={'display': 'flex'})
+
+    return (
+        knowledge_summary, knowledge_charts,
+        maturity_summary, maturity_charts,
+        problem_summary, problem_charts
+    )
+
