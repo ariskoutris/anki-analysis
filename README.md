@@ -4,10 +4,23 @@ An interactive Plotly Dash dashboard for analysing Anki flashcard reviews. Built
 
 ## What it does
 
-The dashboard provides two tabs of interactive charts:
+The dashboard provides two tabs of interactive charts, organized into purpose-driven sections:
 
-- **Study Sessions** -- daily review counts, success rate trends, review speed, time-per-card distribution, memory retention by interval, and a 60-day review load forecast.
-- **Card Knowledge** -- memory state breakdown, retrievability/stability/difficulty distributions, scatter plots of key correlations, lapse analysis, and time-invested vs stability.
+### Study Sessions Tab
+
+| Section | Purpose | What You'll See |
+|---------|---------|----------------|
+| **Study Volume & Consistency** | Track daily habits | Daily reviews chart, hourly performance, streak & best study hour |
+| **Learning Effectiveness** | Monitor recall quality | Success rate trends, review speed, memory decay curve |
+| **Workload Forecast** | Plan ahead | 60-day load forecast with your capacity line, overdue count, peak day |
+
+### Card Knowledge Tab
+
+| Section | Purpose | What You'll See |
+|---------|---------|----------------|
+| **Current Knowledge State** | Quick health check | Memory state pie, retrievability distribution, health score |
+| **Collection Maturity** | Deck composition | Stability/difficulty distributions, memory growth curve |
+| **Problem Areas** | Fix issues | Lapse analysis, leech identification (cards wasting your time) |
 
 All charts update when you switch between backup snapshots or adjust filters (time range, retrievability, difficulty).
 
@@ -61,8 +74,14 @@ Then open <http://127.0.0.1:8050> in your browser.
 ```
 anki-analysis/
 ├── dashboard/
-│   ├── app.py            # Dash application
+│   ├── app.py            # Dash application entry point
+│   ├── callbacks.py      # Callback functions for interactivity
+│   ├── charts_session.py # Session tab chart builders
+│   ├── charts_card.py    # Card tab chart builders
+│   ├── constants.py      # Colors and styling
 │   ├── data_loader.py    # SQL queries and data access
+│   ├── layout.py         # UI layout components
+│   ├── upload_handler.py # .apkg upload processing
 │   └── __init__.py
 ├── scripts/
 │   └── decompress_anki21b.py   # .apkg → SQLite extractor
