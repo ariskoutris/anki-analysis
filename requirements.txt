@@ -1,3 +1,5 @@
 numpy>=1.21.0
-matplotlib>=3.5.0
 zstandard>=0.18.0
+pandas>=1.4.0
+dash>=2.14.0
+plotly>=5.18.0
