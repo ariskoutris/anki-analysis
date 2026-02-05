@@ -9,6 +9,7 @@ from dash import dcc, html, Input, Output, State, callback, ctx
 
 from .constants import COLORS
 from .upload_handler import process_apkg_upload
+from .anki_sync import sync_from_anki, get_sync_info
 from .layout import create_stat_card
 from .charts_session import (
     create_daily_reviews_chart,
@@ -348,6 +349,129 @@ def handle_backup_upload(contents, filename):
             'marginTop': '10px'
         }
         return f"❌ Upload error: {str(e)}", error_style, [], None, False, 0
+
+
+# ---------------------------------------------------------------------------
+# Callback: Sync from Anki
+# ---------------------------------------------------------------------------
+
+@callback(
+    [
+        Output('upload-status-message', 'children', allow_duplicate=True),
+        Output('upload-status-message', 'style', allow_duplicate=True),
+        Output('data-folder-dropdown', 'options', allow_duplicate=True),
+        Output('data-folder-dropdown', 'value', allow_duplicate=True),
+        Output('upload-message-interval', 'disabled', allow_duplicate=True),
+        Output('upload-message-interval', 'n_intervals', allow_duplicate=True),
+    ],
+    [Input('sync-from-anki-button', 'n_clicks')],
+    prevent_initial_call=True
+)
+def handle_anki_sync(n_clicks):
+    """
+    Sync Anki collection from local installation.
+    """
+    if not n_clicks:
+        return "", {'display': 'none'}, [], None, True, 0
+    
+    # Get project root and data directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_dir = os.path.dirname(script_dir)
+    data_dir = os.path.join(project_dir, 'data')
+    
+    # Check sync availability
+    sync_info = get_sync_info()
+    
+    if not sync_info['anki_installed']:
+        error_style = {
+            'display': 'block',
+            'padding': '8px 12px',
+            'backgroundColor': '#fff3cd',
+            'color': '#856404',
+            'borderRadius': '4px',
+            'fontSize': '13px',
+            'marginTop': '10px'
+        }
+        return (
+            "⚠️ Anki installation not found. Please ensure Anki is installed on this system.",
+            error_style, [], None, False, 0
+        )
+    
+    if sync_info['profiles_found'] == 0:
+        error_style = {
+            'display': 'block',
+            'padding': '8px 12px',
+            'backgroundColor': '#fff3cd',
+            'color': '#856404',
+            'borderRadius': '4px',
+            'fontSize': '13px',
+            'marginTop': '10px'
+        }
+        return (
+            f"⚠️ No Anki profiles found in {sync_info['anki_path']}",
+            error_style, [], None, False, 0
+        )
+    
+    if sync_info['anki_running']:
+        error_style = {
+            'display': 'block',
+            'padding': '8px 12px',
+            'backgroundColor': '#f8d7da',
+            'color': '#721c24',
+            'borderRadius': '4px',
+            'fontSize': '13px',
+            'marginTop': '10px'
+        }
+        return (
+            "❌ Anki is currently running. Please close Anki before syncing to avoid database conflicts.",
+            error_style, [], None, False, 0
+        )
+    
+    # Perform sync
+    try:
+        success, message, folder_name = sync_from_anki(None, data_dir)
+        
+        if success:
+            # Update active date
+            set_active_date(folder_name)
+            
+            # Refresh dropdown options
+            dates = get_config_available_dates()
+            options = [{'label': d, 'value': d} for d in dates]
+            
+            success_style = {
+                'display': 'block',
+                'padding': '8px 12px',
+                'backgroundColor': '#d4edda',
+                'color': '#155724',
+                'borderRadius': '4px',
+                'fontSize': '13px',
+                'marginTop': '10px'
+            }
+            return f"✅ {message}", success_style, options, folder_name, False, 0
+        else:
+            error_style = {
+                'display': 'block',
+                'padding': '8px 12px',
+                'backgroundColor': '#f8d7da',
+                'color': '#721c24',
+                'borderRadius': '4px',
+                'fontSize': '13px',
+                'marginTop': '10px'
+            }
+            return f"❌ {message}", error_style, [], None, False, 0
+            
+    except Exception as e:
+        error_style = {
+            'display': 'block',
+            'padding': '8px 12px',
+            'backgroundColor': '#f8d7da',
+            'color': '#721c24',
+            'borderRadius': '4px',
+            'fontSize': '13px',
+            'marginTop': '10px'
+        }
+        return f"❌ Sync error: {str(e)}", error_style, [], None, False, 0
 
 
 # ---------------------------------------------------------------------------# Callback: Auto-dismiss upload message

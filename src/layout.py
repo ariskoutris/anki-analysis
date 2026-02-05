@@ -259,28 +259,49 @@ def create_main_layout(date_options, active_date):
                     html.Div(id='active-date-banner', style={'color': '#666', 'marginLeft': '12px', 'fontWeight': '500', 'fontSize': '0.9rem'}),
                 ], style={'display': 'flex', 'alignItems': 'center', 'flex': '1'}),
 
-                # Upload button
+                # Sync and Upload buttons
                 html.Div([
-                    dcc.Upload(
-                        id='upload-backup-button',
-                        accept='.apkg',
-                        children=html.Button(
-                            '📤 Upload New Backup',
-                            title='Upload an .apkg file to add a new backup',
+                    html.Div([
+                        # Sync from Anki button
+                        html.Button(
+                            '🔄 Sync from Anki',
+                            id='sync-from-anki-button',
+                            title='Sync directly from your local Anki installation',
                             style={
                                 'padding': '8px 16px',
-                                'backgroundColor': COLORS['primary'],
+                                'backgroundColor': COLORS['success'],
                                 'color': 'white',
                                 'border': 'none',
                                 'borderRadius': '6px',
                                 'cursor': 'pointer',
                                 'fontSize': '14px',
                                 'fontWeight': '500',
-                                'transition': 'background-color 0.2s'
+                                'transition': 'background-color 0.2s',
+                                'marginRight': '10px'
                             }
-                        )
-                    ),
-                    # Status message
+                        ),
+                        # Upload button
+                        dcc.Upload(
+                            id='upload-backup-button',
+                            accept='.apkg',
+                            children=html.Button(
+                                '📤 Upload New Backup',
+                                title='Upload an .apkg file to add a new backup',
+                                style={
+                                    'padding': '8px 16px',
+                                    'backgroundColor': COLORS['primary'],
+                                    'color': 'white',
+                                    'border': 'none',
+                                    'borderRadius': '6px',
+                                    'cursor': 'pointer',
+                                    'fontSize': '14px',
+                                    'fontWeight': '500',
+                                    'transition': 'background-color 0.2s'
+                                }
+                            )
+                        ),
+                    ], style={'display': 'flex', 'alignItems': 'center'}),
+                    # Status message (shared by both sync and upload)
                     html.Div(
                         id='upload-status-message',
                         style={'display': 'none'}
