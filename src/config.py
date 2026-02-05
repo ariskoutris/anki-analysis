@@ -14,7 +14,8 @@ _lock = Lock()
 
 def get_project_root():
     """Get the project root directory."""
-    return os.path.dirname(os.path.abspath(__file__))
+    # __file__ is in src/, so we need to go up one level to get project root
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def get_available_dates():
