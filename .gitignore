@@ -46,6 +46,10 @@ data/*.apkg
 *.bak
 *~
 
+# Agent instruction files
+CLAUDE.md
+AGENTS.md
+
 # OS specific files
 .DS_Store
 .DS_Store?
