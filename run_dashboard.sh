@@ -16,6 +16,5 @@ echo "Press Ctrl+C to stop the server"
 echo "=========================================="
 echo ""
 
-# Run the dashboard
-cd dashboard
-python app.py
+# Run the dashboard as a package (from project root)
+python -m dashboard.app
