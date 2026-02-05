@@ -21,7 +21,7 @@ def get_project_root():
 def get_available_dates():
     """
     Get a sorted list of available backup dates from the data directory.
-    Returns a list of date strings in YYYY-MM-DD format (newest first).
+    Returns a list of date strings in YYYY-MM-DD or YYYY-MM-DD-HH-MM-SS format (newest first).
     """
     data_dir = os.path.join(get_project_root(), 'data')
     dates = []
@@ -29,15 +29,26 @@ def get_available_dates():
     if os.path.exists(data_dir):
         for name in os.listdir(data_dir):
             path = os.path.join(data_dir, name)
-            # Check if it's a directory with date format YYYY-MM-DD
-            if os.path.isdir(path) and len(name) == 10 and name.count('-') == 2:
-                try:
-                    # Validate it's a proper date format
-                    year, month, day = name.split('-')
-                    if len(year) == 4 and len(month) == 2 and len(day) == 2:
-                        dates.append(name)
-                except ValueError:
-                    continue
+            # Check if it's a directory with date format YYYY-MM-DD or YYYY-MM-DD-HH-MM-SS
+            if os.path.isdir(path):
+                # Accept both formats: YYYY-MM-DD (10 chars) or YYYY-MM-DD-HH-MM-SS (19 chars)
+                if len(name) == 10 and name.count('-') == 2:
+                    # YYYY-MM-DD format
+                    try:
+                        parts = name.split('-')
+                        if len(parts) == 3 and len(parts[0]) == 4 and len(parts[1]) == 2 and len(parts[2]) == 2:
+                            dates.append(name)
+                    except (ValueError, IndexError):
+                        continue
+                elif len(name) == 19 and name.count('-') == 5:
+                    # YYYY-MM-DD-HH-MM-SS format
+                    try:
+                        parts = name.split('-')
+                        if (len(parts) == 6 and len(parts[0]) == 4 and len(parts[1]) == 2 and 
+                            len(parts[2]) == 2 and len(parts[3]) == 2 and len(parts[4]) == 2 and len(parts[5]) == 2):
+                            dates.append(name)
+                    except (ValueError, IndexError):
+                        continue
 
     dates.sort(reverse=True)  # Newest first
     return dates
