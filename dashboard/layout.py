@@ -19,6 +19,52 @@ def create_stat_card(value, label, color=COLORS['primary']):
     ], className='stat-card')
 
 
+def create_section_container(title, description, content_id, summary_id=None):
+    """
+    Create a section container with header, optional summary stats area, and content area.
+
+    Args:
+        title: Section title
+        description: Brief description of the section's purpose
+        content_id: ID for the content div (where charts go)
+        summary_id: Optional ID for summary stats div
+    """
+    children = [
+        # Section header
+        html.Div([
+            html.H3(title, style={
+                'margin': '0 0 4px 0',
+                'fontSize': '1.1rem',
+                'fontWeight': '600',
+                'color': COLORS['dark']
+            }),
+            html.P(description, style={
+                'margin': '0',
+                'fontSize': '0.85rem',
+                'color': '#666'
+            })
+        ], style={
+            'marginBottom': '16px',
+            'paddingBottom': '12px',
+            'borderBottom': f"2px solid {COLORS['primary']}"
+        }),
+    ]
+
+    # Optional summary stats container
+    if summary_id:
+        children.append(html.Div(id=summary_id, style={'marginBottom': '16px'}))
+
+    # Content area for charts
+    children.append(html.Div(id=content_id))
+
+    return html.Div(children, style={
+        'marginBottom': '32px',
+        'padding': '20px',
+        'backgroundColor': '#fafafa',
+        'borderRadius': '8px'
+    })
+
+
 def create_session_tab():
     """Create the session analytics tab content"""
     # Generate year options dynamically based on current date
@@ -96,8 +142,32 @@ def create_session_tab():
             }),
         ], style={'padding': '20px', 'borderBottom': '1px solid #eee', 'display': 'flex', 'alignItems': 'center'}),
 
-        # Session charts
-        html.Div(id='session-charts', style={'padding': '20px'})
+        # Session sections with charts
+        html.Div([
+            # Section 1: Study Volume & Consistency
+            create_section_container(
+                "Study Volume & Consistency",
+                "Track your daily study habits and identify patterns",
+                content_id='session-volume-charts',
+                summary_id='session-volume-summary'
+            ),
+
+            # Section 2: Learning Effectiveness
+            create_section_container(
+                "Learning Effectiveness",
+                "Monitor your recall rate and review efficiency over time",
+                content_id='session-effectiveness-charts',
+                summary_id='session-effectiveness-summary'
+            ),
+
+            # Section 3: Workload Forecast
+            create_section_container(
+                "Workload Forecast",
+                "Plan ahead with predictions of upcoming review load",
+                content_id='session-workload-charts',
+                summary_id='session-workload-summary'
+            ),
+        ], style={'padding': '20px'})
     ])
 
 
@@ -132,8 +202,32 @@ def create_cards_tab():
             ], style={'flex': '1'}),
         ], style={'padding': '20px', 'borderBottom': '1px solid #eee', 'display': 'flex', 'alignItems': 'center'}),
 
-        # Card charts
-        html.Div(id='card-charts', style={'padding': '20px'})
+        # Card sections with charts
+        html.Div([
+            # Section 1: Current Knowledge State
+            create_section_container(
+                "Current Knowledge State",
+                "Quick health check of your memory across all cards",
+                content_id='card-knowledge-charts',
+                summary_id='card-knowledge-summary'
+            ),
+
+            # Section 2: Collection Maturity
+            create_section_container(
+                "Collection Maturity",
+                "Understand your deck composition and learning progress",
+                content_id='card-maturity-charts',
+                summary_id='card-maturity-summary'
+            ),
+
+            # Section 3: Problem Areas
+            create_section_container(
+                "Problem Areas",
+                "Identify cards that need attention or reformulation",
+                content_id='card-problem-charts',
+                summary_id='card-problem-summary'
+            ),
+        ], style={'padding': '20px'})
     ])
 
 

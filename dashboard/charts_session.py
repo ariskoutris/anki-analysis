@@ -10,9 +10,8 @@ from plotly.subplots import make_subplots
 from .constants import COLORS
 from .data_loader import (
     get_future_load_forecast,
-    get_daily_load_by_stability,
     get_card_data,
-    calculate_daily_load,
+    get_historical_average_reviews,
 )
 
 
@@ -327,76 +326,6 @@ def create_efficiency_chart(df, use_sessions=False):
     return fig
 
 
-def create_time_per_card_chart(df):
-    """Create time per card distribution chart"""
-    if df.empty:
-        return go.Figure()
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Histogram(
-        x=df['avg_time_per_card'],
-        nbinsx=30,
-        marker_color=COLORS['primary'],
-        opacity=0.7,
-        hovertemplate='Time: %{x:.1f}s<br>Sessions: %{y}<extra></extra>'
-    ))
-
-    median_time = df['avg_time_per_card'].median()
-    fig.add_vline(x=median_time, line_dash="dash", line_color=COLORS['danger'],
-                  annotation_text=f"Median: {median_time:.1f}s", annotation_position="top")
-
-    fig.update_layout(
-        title='Time per Card Distribution',
-        xaxis_title='Seconds per Card',
-        yaxis_title='Number of Sessions',
-        margin=dict(l=40, r=40, t=60, b=40),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-    )
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#eee')
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#eee')
-
-    return fig
-
-
-def create_session_scatter_chart(df):
-    """Create session size vs duration scatter chart"""
-    if df.empty:
-        return go.Figure()
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=df['total_cards'],
-        y=df['total_session_minutes'],
-        mode='markers',
-        marker=dict(
-            size=10,
-            color=df['success_rate'],
-            colorscale='RdYlGn',
-            cmin=60,
-            cmax=100,
-            colorbar=dict(title='Success %'),
-            line=dict(width=1, color='white')
-        ),
-        hovertemplate='Cards: %{x}<br>Duration: %{y:.1f} min<br>Success: %{marker.color:.1f}%<extra></extra>'
-    ))
-
-    fig.update_layout(
-        title='Session Size vs Duration',
-        xaxis_title='Cards Reviewed',
-        yaxis_title='Session Duration (min)',
-        margin=dict(l=40, r=40, t=60, b=40),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-    )
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#eee')
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#eee')
-
-    return fig
-
-
 def create_memory_decay_chart(df):
     """Create memory decay curve chart"""
     if df.empty:
@@ -457,13 +386,16 @@ def create_memory_decay_chart(df):
 
 
 def create_future_load_chart(days_ahead=60):
-    """Create future review load forecast chart"""
+    """Create future review load forecast chart with capacity line"""
     df = get_future_load_forecast(days_ahead)
 
     if df.empty:
         return go.Figure()
 
     fig = go.Figure()
+
+    # Get historical average for capacity line
+    avg_capacity = get_historical_average_reviews()
 
     # Daily due counts
     fig.add_trace(go.Bar(
@@ -474,7 +406,7 @@ def create_future_load_chart(days_ahead=60):
             color=df['due_count'],
             colorscale=[[0, COLORS['success']], [0.5, COLORS['warning']], [1, COLORS['danger']]],
             cmin=0,
-            cmax=df['due_count'].quantile(0.95),
+            cmax=df['due_count'].quantile(0.95) if len(df) > 0 else 50,
             showscale=False
         ),
         hovertemplate='%{x|%b %d}<br>Due: %{y} cards<extra></extra>'
@@ -490,11 +422,16 @@ def create_future_load_chart(days_ahead=60):
         hovertemplate='%{x|%b %d}<br>Avg: %{y:.0f} cards<extra></extra>'
     ))
 
-    # Reference lines
-    fig.add_hline(y=30, line_dash="dot", line_color=COLORS['warning'], opacity=0.5,
-                  annotation_text="Moderate (30)", annotation_position="right")
-    fig.add_hline(y=50, line_dash="dot", line_color=COLORS['danger'], opacity=0.5,
-                  annotation_text="Heavy (50)", annotation_position="right")
+    # Add capacity line based on historical average
+    if avg_capacity > 0:
+        fig.add_hline(
+            y=avg_capacity,
+            line_dash="dash",
+            line_color=COLORS['info'],
+            opacity=0.8,
+            annotation_text=f"Your Avg Capacity ({avg_capacity:.0f})",
+            annotation_position="top right"
+        )
 
     fig.update_layout(
         title=f'Review Load Forecast (Next {days_ahead} Days)',
@@ -505,125 +442,6 @@ def create_future_load_chart(days_ahead=60):
         plot_bgcolor='white',
         paper_bgcolor='white',
         hovermode='x unified'
-    )
-    fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#eee')
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#eee', rangemode='tozero')
-
-    return fig
-
-
-def create_daily_load_contribution_chart():
-    """Create daily load contribution by stability chart"""
-    df = get_daily_load_by_stability()
-
-    if df.empty:
-        return go.Figure()
-
-    fig = go.Figure()
-
-    # Create stacked bar showing contribution
-    colors = [COLORS['danger'], COLORS['warning'], COLORS['info'], COLORS['primary'], COLORS['success'], COLORS['excellent']]
-
-    fig.add_trace(go.Bar(
-        x=df['stability_range'],
-        y=df['load_contribution'],
-        marker=dict(
-            color=colors[:len(df)],
-            line=dict(width=1, color='white')
-        ),
-        text=df['load_contribution'].round(2),
-        textposition='auto',
-        hovertemplate='%{x}<br>Load: %{y:.2f}<br>Cards: %{customdata}<extra></extra>',
-        customdata=df['card_count']
-    ))
-
-    total_load = calculate_daily_load()
-
-    fig.update_layout(
-        title=f'Daily Load by Stability Range (Total: {total_load})',
-        xaxis_title='Stability Range',
-        yaxis_title='Load Contribution (Σ1/interval)',
-        margin=dict(l=40, r=40, t=60, b=40),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-    )
-    fig.update_xaxes(showgrid=False)
-    fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#eee', rangemode='tozero')
-
-    return fig
-
-
-def create_load_contribution_distribution_chart():
-    """Create distribution of 1/interval values (load contribution per card)"""
-    cards_df = get_card_data()
-
-    if cards_df.empty:
-        return go.Figure()
-
-    # Filter review cards with valid intervals
-    review_cards = cards_df[cards_df['interval'] > 0].copy()
-
-    if review_cards.empty:
-        return go.Figure()
-
-    # Calculate load contribution per card
-    review_cards['interval_safe'] = review_cards['interval'].clip(lower=1)
-    review_cards['load_contribution'] = 1.0 / review_cards['interval_safe']
-
-    fig = go.Figure()
-
-    # Histogram of load contributions
-    fig.add_trace(go.Histogram(
-        x=review_cards['load_contribution'],
-        nbinsx=50,
-        marker_color=COLORS['primary'],
-        opacity=0.75,
-        hovertemplate='Load: %{x:.3f}<br>Cards: %{y}<extra></extra>'
-    ))
-
-    # Add vertical line for median
-    median_load = review_cards['load_contribution'].median()
-    fig.add_vline(
-        x=median_load,
-        line_dash="dash",
-        line_color=COLORS['danger'],
-        annotation_text=f"Median: {median_load:.3f}",
-        annotation_position="top"
-    )
-
-    # Add vertical line for mean
-    mean_load = review_cards['load_contribution'].mean()
-    fig.add_vline(
-        x=mean_load,
-        line_dash="dot",
-        line_color=COLORS['warning'],
-        annotation_text=f"Mean: {mean_load:.3f}",
-        annotation_position="bottom"
-    )
-
-    total_load = calculate_daily_load()
-
-    fig.update_layout(
-        title=f'Load Contribution Distribution (1/interval per card)',
-        xaxis_title='Load Contribution (1/interval)',
-        yaxis_title='Number of Cards',
-        margin=dict(l=40, r=40, t=80, b=40),
-        plot_bgcolor='white',
-        paper_bgcolor='white',
-        annotations=[
-            dict(
-                text=f"Total Daily Load: {total_load}",
-                xref="paper", yref="paper",
-                x=0.98, y=0.98,
-                xanchor='right', yanchor='top',
-                showarrow=False,
-                font=dict(size=12, color=COLORS['dark']),
-                bgcolor='rgba(255,255,255,0.8)',
-                bordercolor=COLORS['primary'],
-                borderwidth=1,
-                borderpad=4
-            )
-        ]
     )
     fig.update_xaxes(showgrid=True, gridwidth=1, gridcolor='#eee')
     fig.update_yaxes(showgrid=True, gridwidth=1, gridcolor='#eee', rangemode='tozero')

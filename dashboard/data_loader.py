@@ -694,6 +694,278 @@ def get_daily_load_history(days: int = 90) -> pd.DataFrame:
     return df
 
 
+def get_consistency_stats(review_days: int | None = None) -> dict:
+    """
+    Calculate study consistency statistics: streaks, gaps, and regularity.
+
+    Returns:
+        Dictionary with streak and consistency metrics
+    """
+    conn = connect_db()
+
+    # Get all study dates
+    review_filter = build_time_filter(review_days)
+    query = f"""
+        SELECT DISTINCT date(r.id/1000, 'unixepoch', 'localtime') as study_date
+        FROM revlog r
+        JOIN cards c ON r.cid = c.id
+        WHERE r.id > 0
+          AND r.type != 4
+          AND c.queue != -1
+          {review_filter}
+        ORDER BY study_date
+    """
+
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+
+    if df.empty:
+        return {
+            'current_streak': 0,
+            'longest_streak': 0,
+            'total_study_days': 0,
+            'avg_days_per_week': 0.0,
+            'best_hour': None
+        }
+
+    df['study_date'] = pd.to_datetime(df['study_date']).dt.date
+    study_dates = set(df['study_date'])
+    today = datetime.now().date()
+
+    # Calculate current streak (consecutive days ending today or yesterday)
+    current_streak = 0
+    check_date = today
+    while check_date in study_dates:
+        current_streak += 1
+        check_date -= timedelta(days=1)
+
+    # If no study today, check if streak was broken (yesterday not studied)
+    if today not in study_dates and (today - timedelta(days=1)) in study_dates:
+        current_streak = 0
+        check_date = today - timedelta(days=1)
+        while check_date in study_dates:
+            current_streak += 1
+            check_date -= timedelta(days=1)
+
+    # Calculate longest streak
+    sorted_dates = sorted(study_dates)
+    longest_streak = 0
+    streak = 1
+    for i in range(1, len(sorted_dates)):
+        if (sorted_dates[i] - sorted_dates[i-1]).days == 1:
+            streak += 1
+        else:
+            longest_streak = max(longest_streak, streak)
+            streak = 1
+    longest_streak = max(longest_streak, streak)
+
+    # Calculate avg days per week (last 4 weeks)
+    four_weeks_ago = today - timedelta(days=28)
+    recent_days = [d for d in study_dates if d >= four_weeks_ago]
+    avg_days_per_week = len(recent_days) / 4 if recent_days else 0
+
+    return {
+        'current_streak': current_streak,
+        'longest_streak': longest_streak,
+        'total_study_days': len(study_dates),
+        'avg_days_per_week': round(avg_days_per_week, 1)
+    }
+
+
+def get_best_study_hour(review_days: int | None = None) -> int | None:
+    """Get the hour with highest success rate (min 20 reviews)."""
+    hourly_df = get_hourly_stats(review_days)
+    if hourly_df.empty:
+        return None
+
+    # Filter hours with sufficient data
+    qualified = hourly_df[hourly_df['review_count'] >= 20]
+    if qualified.empty:
+        return None
+
+    best_idx = qualified['success_rate'].idxmax()
+    return int(qualified.loc[best_idx, 'hour'])
+
+
+def get_leech_candidates(min_lapses: int = 3, max_results: int = 20) -> pd.DataFrame:
+    """
+    Identify problem cards (leeches) based on high lapse count and time wasted.
+
+    Returns DataFrame of cards sorted by "leech score" (time wasted on forgetting).
+    """
+    time_df = get_total_time_per_card()
+
+    if time_df.empty:
+        return pd.DataFrame()
+
+    # Filter to cards with significant lapses
+    leeches = time_df[time_df['lapses'] >= min_lapses].copy()
+
+    if leeches.empty:
+        return pd.DataFrame()
+
+    # Calculate leech score: time wasted = total_time * (lapses / reps)
+    # Higher score = more time spent on cards that keep failing
+    leeches['lapse_ratio'] = leeches['lapses'] / leeches['reps'].clip(lower=1)
+    leeches['time_wasted_seconds'] = leeches['total_time_seconds'] * leeches['lapse_ratio']
+    leeches['leech_score'] = leeches['time_wasted_seconds'] / 60  # Convert to minutes
+
+    # Sort by leech score and take top results
+    leeches = leeches.nlargest(max_results, 'leech_score')
+
+    return leeches[['card_id', 'lapses', 'reps', 'total_time_seconds', 'stability',
+                    'retrievability', 'lapse_ratio', 'leech_score']]
+
+
+def get_workload_summary() -> dict:
+    """
+    Get summary of upcoming workload for quick stats.
+
+    Returns:
+        Dictionary with workload metrics
+    """
+    forecast_df = get_future_load_forecast(30)
+    cards_df = get_card_data()
+
+    if forecast_df.empty:
+        return {
+            'due_this_week': 0,
+            'overdue_cards': 0,
+            'peak_day': None,
+            'peak_day_count': 0,
+            'daily_load': 0.0
+        }
+
+    # Cards due in next 7 days
+    due_this_week = int(forecast_df.head(7)['due_count'].sum())
+
+    # Find peak day in next 30 days
+    peak_idx = forecast_df['due_count'].idxmax()
+    peak_day = forecast_df.loc[peak_idx, 'date']
+    peak_day_count = int(forecast_df.loc[peak_idx, 'due_count'])
+
+    # Overdue cards (days_overdue > 0)
+    overdue_cards = 0
+    if not cards_df.empty and 'days_overdue' in cards_df.columns:
+        overdue_cards = int((cards_df['days_overdue'] > 0).sum())
+
+    # Current daily load
+    daily_load = calculate_daily_load()
+
+    return {
+        'due_this_week': due_this_week,
+        'overdue_cards': overdue_cards,
+        'peak_day': peak_day,
+        'peak_day_count': peak_day_count,
+        'daily_load': daily_load
+    }
+
+
+def get_knowledge_health_stats() -> dict:
+    """
+    Get summary statistics about knowledge health for section summary cards.
+
+    Returns:
+        Dictionary with health metrics
+    """
+    memory = get_memory_state_summary()
+    cards_df = get_card_data()
+
+    if memory['total'] == 0:
+        return {
+            'health_score': 0,
+            'cards_needing_attention': 0,
+            'median_retrievability': 0,
+            'avg_stability': 0,
+            'mature_cards_pct': 0,
+            'leech_count': 0
+        }
+
+    # Health score: percentage of cards in good or excellent state
+    health_score = round((memory['good'] + memory['excellent']) / memory['total'] * 100, 1)
+
+    # Cards needing attention: critical + at_risk
+    cards_needing_attention = memory['critical'] + memory['at_risk']
+
+    # Stability stats
+    avg_stability = 0
+    mature_cards_pct = 0
+    leech_count = 0
+
+    if not cards_df.empty:
+        avg_stability = round(float(cards_df['stability'].mean()), 1)
+        # Mature = stability > 30 days
+        mature_cards = (cards_df['stability'] > 30).sum()
+        mature_cards_pct = round(mature_cards / len(cards_df) * 100, 1)
+        # Leeches = cards with 3+ lapses
+        leech_count = int((cards_df['lapses'] >= 3).sum())
+
+    return {
+        'health_score': health_score,
+        'cards_needing_attention': cards_needing_attention,
+        'median_retrievability': memory['median_retrievability'],
+        'avg_stability': avg_stability,
+        'mature_cards_pct': mature_cards_pct,
+        'leech_count': leech_count
+    }
+
+
+def get_session_summary_stats(review_days: int | None = None, year_filter: int | None = None) -> dict:
+    """
+    Get summary statistics for session tab section cards.
+    """
+    session_df = get_session_data(review_days, year_filter)
+    consistency = get_consistency_stats(review_days)
+    best_hour = get_best_study_hour(review_days)
+
+    if session_df.empty:
+        return {
+            'weekly_velocity': 0,
+            'avg_success_rate': 0,
+            'current_streak': consistency['current_streak'],
+            'best_hour': best_hour,
+            'avg_session_size': 0,
+            'trend': 'stable'
+        }
+
+    # Weekly velocity: avg reviews per day in last 7 days
+    recent = session_df.tail(7) if len(session_df) >= 7 else session_df
+    weekly_velocity = round(float(recent['total_cards'].mean()), 1)
+
+    # Average success rate
+    avg_success_rate = round(float(session_df['success_rate'].mean()), 1)
+
+    # Trend: compare last 7 sessions to previous 7
+    trend = 'stable'
+    if len(session_df) >= 14:
+        recent_avg = session_df.tail(7)['success_rate'].mean()
+        previous_avg = session_df.iloc[-14:-7]['success_rate'].mean()
+        diff = recent_avg - previous_avg
+        if diff > 2:
+            trend = 'up'
+        elif diff < -2:
+            trend = 'down'
+
+    avg_session_size = round(float(session_df['total_cards'].mean()), 0)
+
+    return {
+        'weekly_velocity': weekly_velocity,
+        'avg_success_rate': avg_success_rate,
+        'current_streak': consistency['current_streak'],
+        'best_hour': best_hour,
+        'avg_session_size': avg_session_size,
+        'trend': trend
+    }
+
+
+def get_historical_average_reviews() -> float:
+    """Get historical average reviews per day for capacity line."""
+    session_df = get_session_data()
+    if session_df.empty:
+        return 0
+    return round(float(session_df['total_cards'].mean()), 1)
+
+
 def get_future_load_forecast(days_ahead: int = 60) -> pd.DataFrame:
     """
     Forecast future review load based on due dates.
