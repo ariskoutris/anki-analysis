@@ -61,9 +61,16 @@ def get_anki_profiles() -> List[Tuple[str, Path]]:
             if not item.is_dir():
                 continue
             
-            collection_path = item / "collection.anki21b"
-            if collection_path.exists():
-                profiles.append((item.name, collection_path))
+            # Check for both collection formats:
+            # - collection.anki21b (newer compressed format)
+            # - collection.anki2 (older SQLite format)
+            collection_anki21b = item / "collection.anki21b"
+            collection_anki2 = item / "collection.anki2"
+            
+            if collection_anki21b.exists():
+                profiles.append((item.name, collection_anki21b))
+            elif collection_anki2.exists():
+                profiles.append((item.name, collection_anki2))
     except (PermissionError, OSError):
         return []
     
@@ -178,18 +185,24 @@ def sync_from_anki(profile_name: Optional[str], data_root: str) -> Tuple[bool, s
         target_folder = os.path.join(data_root, folder_name)
         os.makedirs(target_folder, exist_ok=True)
         
-        # Copy collection.anki21b to target folder
-        target_anki21b = os.path.join(target_folder, "collection.anki21b")
-        shutil.copy2(collection_path, target_anki21b)
-        
-        # Decompress to SQLite database
         output_db = os.path.join(target_folder, "decompressed_anki21b.db")
-        success, decompress_msg = decompress_anki21b(target_anki21b, output_db)
         
-        if not success:
-            # Clean up on failure
-            shutil.rmtree(target_folder, ignore_errors=True)
-            return False, f"Decompression failed: {decompress_msg}", None
+        # Handle both collection formats
+        if collection_path.name == "collection.anki21b":
+            # Compressed format - needs decompression
+            target_anki21b = os.path.join(target_folder, "collection.anki21b")
+            shutil.copy2(collection_path, target_anki21b)
+            
+            # Decompress to SQLite database
+            success, decompress_msg = decompress_anki21b(target_anki21b, output_db)
+            
+            if not success:
+                # Clean up on failure
+                shutil.rmtree(target_folder, ignore_errors=True)
+                return False, f"Decompression failed: {decompress_msg}", None
+        else:
+            # collection.anki2 - already SQLite, just copy
+            shutil.copy2(collection_path, output_db)
         
         # Validate database
         valid, validate_msg = validate_database(output_db)
