@@ -474,7 +474,8 @@ def handle_anki_sync(n_clicks):
         return f"❌ Sync error: {str(e)}", error_style, [], None, False, 0
 
 
-# ---------------------------------------------------------------------------# Callback: Auto-dismiss upload message
+# ---------------------------------------------------------------------------
+# Callback: Auto-dismiss upload message
 # ---------------------------------------------------------------------------
 
 @callback(

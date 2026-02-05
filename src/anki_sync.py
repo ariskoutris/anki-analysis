@@ -7,6 +7,7 @@ import os
 import platform
 import shutil
 import sqlite3
+import subprocess
 from pathlib import Path
 from datetime import datetime
 from typing import Tuple, List, Optional
@@ -79,9 +80,8 @@ def is_anki_running() -> bool:
     system = platform.system()
     
     try:
-        if system == "Linux" or system == "Darwin":
+        if system in ("Linux", "Darwin"):
             # Check for anki process
-            import subprocess
             result = subprocess.run(
                 ["pgrep", "-f", "anki"],
                 capture_output=True,
@@ -89,7 +89,6 @@ def is_anki_running() -> bool:
             )
             return bool(result.stdout.strip())
         elif system == "Windows":
-            import subprocess
             result = subprocess.run(
                 ["tasklist", "/FI", "IMAGENAME eq anki.exe"],
                 capture_output=True,
