@@ -34,20 +34,12 @@ pip-delete-this-directory.txt
 *.mo
 *.pot
 
-# Django stuff:
-*.log
-local_settings.py
-db.sqlite3
-db.sqlite3-journal
-
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# Project-specific ignores
-# Anki data files (keep compressed/original files but ignore decompressed)
-data/decompressed_anki21b.db
-data/*.db
-data/temp/
+# Anki data
+data/*/
+data/*.apkg
 
 # Temporary files
 *.tmp
