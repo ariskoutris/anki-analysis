@@ -88,12 +88,20 @@ def is_anki_running() -> bool:
     
     try:
         if system in ("Linux", "Darwin"):
-            # Check for anki process
+            # Check for anki process more specifically
+            # Look for the actual Anki executable, not just any process with "anki" in the path
             result = subprocess.run(
-                ["pgrep", "-f", "anki"],
+                ["pgrep", "-i", "^anki$"],
                 capture_output=True,
                 text=True
             )
+            # Also check for anki.bin (Linux package name)
+            if not result.stdout.strip():
+                result = subprocess.run(
+                    ["pgrep", "-i", "^anki.bin$"],
+                    capture_output=True,
+                    text=True
+                )
             return bool(result.stdout.strip())
         elif system == "Windows":
             result = subprocess.run(
