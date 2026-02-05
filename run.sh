@@ -17,4 +17,4 @@ echo "=========================================="
 echo ""
 
 # Run the dashboard as a package (from project root)
-python -m dashboard.app
+python -m src.app

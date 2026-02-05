@@ -6,9 +6,7 @@ from datetime import datetime
 from dash import dcc, html
 
 from .constants import COLORS
-
-# Import anki_config via the sys.path already set up by app.py
-from anki_config import get_active_date
+from src.config import get_active_date
 
 
 def create_stat_card(value, label, color=COLORS['primary']):

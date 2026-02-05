@@ -14,9 +14,7 @@ import sys
 from datetime import datetime, timedelta
 from functools import lru_cache
 
-# Add parent directory to path for anki_config import
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from anki_config import get_db_path as get_config_db_path
+from src.config import get_db_path as get_config_db_path
 
 
 def get_db_path():

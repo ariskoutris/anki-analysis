@@ -4,14 +4,8 @@ Interactive Anki Learning Dashboard
 Entry point: creates the Dash app, sets layout, and registers callbacks.
 """
 
-import os
-import sys
-
-# Ensure project root is importable for anki_config
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import dash
-from anki_config import get_active_date, get_available_dates as get_config_available_dates
+from src.config import get_active_date, get_available_dates as get_config_available_dates
 
 from .constants import INDEX_STRING
 from .layout import create_main_layout

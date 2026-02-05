@@ -40,7 +40,7 @@ from .data_loader import (
     get_knowledge_health_stats,
     get_leech_candidates,
 )
-from anki_config import (
+from src.config import (
     get_active_date,
     get_available_dates as get_config_available_dates,
     set_active_date,
