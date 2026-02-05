@@ -147,11 +147,16 @@ def create_main_layout(date_options, active_date):
                 html.Div([
                     html.H1("📚 Anki Learning Dashboard"),
                     html.P("Interactive analysis of your learning journey and memory states")
-                ], style={'flex': '1'}),
+                ], style={'textAlign': 'center'})
+            ], className='header'),
 
-                # Data backup selector
+            # Overview stats
+            html.Div(id='overview-container'),
+
+            # Data backup controls
+            html.Div([
                 html.Div([
-                    html.Label("Data backup:", style={'color': 'white', 'fontWeight': '600', 'marginRight': '8px'}),
+                    html.Label("Data Backup:", style={'fontWeight': '600', 'marginRight': '10px', 'color': '#333'}),
                     dcc.Dropdown(
                         id='data-folder-dropdown',
                         options=date_options,
@@ -159,36 +164,45 @@ def create_main_layout(date_options, active_date):
                         clearable=False,
                         style={'width': '220px'}
                     ),
-                    html.Div(id='active-date-banner', style={'color': 'white', 'marginLeft': '12px', 'fontWeight': '600'}),
+                    html.Div(id='active-date-banner', style={'color': '#666', 'marginLeft': '12px', 'fontWeight': '500', 'fontSize': '0.9rem'}),
+                ], style={'display': 'flex', 'alignItems': 'center', 'flex': '1'}),
 
-                    # Global axis scale controls
-                    html.Div([
-                        html.Label('X scale:', style={'color': 'white', 'fontWeight': '600', 'marginRight': '6px'}),
-                        dcc.Dropdown(
-                            id='x-scale-dropdown',
-                            options=[{'label': 'Linear', 'value': 'linear'}, {'label': 'Log', 'value': 'log'}],
-                            value='linear',
-                            clearable=False,
-                            style={'width': '120px'}
+                # Upload button
+                html.Div([
+                    dcc.Upload(
+                        id='upload-backup-button',
+                        accept='.apkg',
+                        children=html.Button(
+                            '📤 Upload New Backup',
+                            title='Upload an .apkg file to add a new backup',
+                            style={
+                                'padding': '8px 16px',
+                                'backgroundColor': COLORS['primary'],
+                                'color': 'white',
+                                'border': 'none',
+                                'borderRadius': '6px',
+                                'cursor': 'pointer',
+                                'fontSize': '14px',
+                                'fontWeight': '500',
+                                'transition': 'background-color 0.2s'
+                            }
                         )
-                    ], style={'display': 'flex', 'alignItems': 'center', 'marginLeft': '12px'}),
-
-                    html.Div([
-                        html.Label('Y scale:', style={'color': 'white', 'fontWeight': '600', 'marginRight': '6px'}),
-                        dcc.Dropdown(
-                            id='y-scale-dropdown',
-                            options=[{'label': 'Linear', 'value': 'linear'}, {'label': 'Log', 'value': 'log'}],
-                            value='linear',
-                            clearable=False,
-                            style={'width': '120px'}
-                        )
-                    ], style={'display': 'flex', 'alignItems': 'center', 'marginLeft': '8px'})
-                ], style={'display': 'flex', 'alignItems': 'center', 'gap': '8px'})
-
-            ], className='header', style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between'}),
-
-            # Overview stats (dynamic)
-            html.Div(id='overview-container'),
+                    ),
+                    # Status message
+                    html.Div(
+                        id='upload-status-message',
+                        style={'display': 'none'}
+                    ),
+                    # Auto-dismiss interval (triggers 3 seconds after message shown)
+                    dcc.Interval(
+                        id='upload-message-interval',
+                        interval=3000,  # 3 seconds
+                        n_intervals=0,
+                        max_intervals=1,  # Only fire once
+                        disabled=True  # Start disabled
+                    ),
+                ], style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'flex-end'}),
+            ], className='backup-controls'),
 
             # Tabs
             html.Div([

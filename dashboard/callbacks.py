@@ -3,9 +3,12 @@ Dash callbacks for the Anki Learning Dashboard.
 All @callback decorators register against the global Dash app instance.
 """
 
+import base64
+import os
 from dash import dcc, html, Input, Output, State, callback, ctx
 
 from .constants import COLORS
+from .upload_handler import process_apkg_upload
 from .layout import create_stat_card
 from .charts_session import (
     create_daily_reviews_chart,
@@ -252,14 +255,122 @@ def save_data_backup_to_store(backup_value):
         'xaxis_mode': current_store.get('xaxis_mode', 'dates'),
         'retrievability_filter': current_store.get('retrievability_filter', [0, 100]),
         'difficulty_filter': current_store.get('difficulty_filter', [0, 10]),
-        'axis_x_scale': current_store.get('axis_x_scale', 'linear'),
-        'axis_y_scale': current_store.get('axis_y_scale', 'linear'),
         'data_backup': backup_value or get_active_date()
     }
 
 
 # ---------------------------------------------------------------------------
-# Callback: Update session charts
+# Callback: Handle backup file upload
+# ---------------------------------------------------------------------------
+
+@callback(
+    [
+        Output('upload-status-message', 'children'),
+        Output('upload-status-message', 'style'),
+        Output('data-folder-dropdown', 'options', allow_duplicate=True),
+        Output('data-folder-dropdown', 'value', allow_duplicate=True),
+        Output('upload-message-interval', 'disabled'),
+        Output('upload-message-interval', 'n_intervals'),
+    ],
+    [Input('upload-backup-button', 'contents')],
+    [
+        State('upload-backup-button', 'filename'),
+    ],
+    prevent_initial_call=True
+)
+def handle_backup_upload(contents, filename):
+    """
+    Process uploaded .apkg file: validate, extract, decompress, and add to backups.
+    """
+    if not contents:
+        return "", {'display': 'none'}, [], None, True, 0
+
+    # Validate file extension
+    if not filename or not filename.lower().endswith('.apkg'):
+        error_style = {
+            'display': 'block',
+            'padding': '8px 12px',
+            'backgroundColor': '#f8d7da',
+            'color': '#721c24',
+            'borderRadius': '4px',
+            'fontSize': '13px',
+            'marginTop': '10px'
+        }
+        return "❌ Invalid file format. Please upload an .apkg file.", error_style, [], None, False, 0
+
+    try:
+        # Decode base64 contents
+        content_type, content_string = contents.split(',')
+        file_bytes = base64.b64decode(content_string)
+
+        # Get project root and data directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_dir = os.path.dirname(script_dir)
+        data_dir = os.path.join(project_dir, 'data')
+
+        # Process upload
+        success, message, folder_name = process_apkg_upload(file_bytes, data_dir)
+
+        if success:
+            # Update active date
+            set_active_date(folder_name)
+
+            # Refresh dropdown options
+            dates = get_config_available_dates()
+            options = [{'label': d, 'value': d} for d in dates]
+
+            success_style = {
+                'display': 'block',
+                'padding': '8px 12px',
+                'backgroundColor': '#d4edda',
+                'color': '#155724',
+                'borderRadius': '4px',
+                'fontSize': '13px',
+                'marginTop': '10px'
+            }
+            return f"✅ {message}", success_style, options, folder_name, False, 0
+        else:
+            error_style = {
+                'display': 'block',
+                'padding': '8px 12px',
+                'backgroundColor': '#f8d7da',
+                'color': '#721c24',
+                'borderRadius': '4px',
+                'fontSize': '13px',
+                'marginTop': '10px'
+            }
+            return f"❌ {message}", error_style, [], None, False, 0
+
+    except Exception as e:
+        error_style = {
+            'display': 'block',
+            'padding': '8px 12px',
+            'backgroundColor': '#f8d7da',
+            'color': '#721c24',
+            'borderRadius': '4px',
+            'fontSize': '13px',
+            'marginTop': '10px'
+        }
+        return f"❌ Upload error: {str(e)}", error_style, [], None, False, 0
+
+
+# ---------------------------------------------------------------------------# Callback: Auto-dismiss upload message
+# ---------------------------------------------------------------------------
+
+@callback(
+    [
+        Output('upload-status-message', 'style', allow_duplicate=True),
+        Output('upload-message-interval', 'disabled', allow_duplicate=True),
+    ],
+    [Input('upload-message-interval', 'n_intervals')],
+    prevent_initial_call=True
+)
+def auto_dismiss_upload_message(n):
+    """Hide the upload status message after 3 seconds."""
+    return {'display': 'none'}, True
+
+
+# ---------------------------------------------------------------------------# Callback: Update session charts
 # ---------------------------------------------------------------------------
 
 @callback(

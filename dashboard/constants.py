@@ -108,6 +108,17 @@ INDEX_STRING = '''
                 border-bottom: 3px solid #667eea !important;
                 color: #667eea !important;
             }
+            .backup-controls {
+                background: white;
+                border-radius: 12px;
+                padding: 16px 20px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+                margin-bottom: 20px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 20px;
+            }
         </style>
     </head>
     <body>
