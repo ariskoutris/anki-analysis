@@ -6,7 +6,6 @@ from datetime import datetime
 from dash import dcc, html
 
 from .constants import COLORS
-from src.config import get_active_date
 
 
 def create_stat_card(value, label, color=COLORS['primary']):
@@ -136,7 +135,6 @@ def create_session_tab():
                 'xaxis_mode': 'dates',
                 'retrievability_filter': [0, 100],
                 'difficulty_filter': [0, 10],
-                'data_backup': get_active_date()
             }),
         ], style={'padding': '20px', 'borderBottom': '1px solid #eee', 'display': 'flex', 'alignItems': 'center'}),
 
@@ -229,93 +227,76 @@ def create_cards_tab():
     ])
 
 
-def create_main_layout(date_options, active_date):
+def create_main_layout():
     """Assemble the full page layout (header, overview, tabs)."""
     return html.Div([
         html.Div([
             # Header
             html.Div([
                 dcc.Location(id='url', refresh=True),
-                html.Div([
-                    html.H1("📚 Anki Learning Dashboard"),
-                    html.P("Interactive analysis of your learning journey and memory states")
-                ], style={'textAlign': 'center'})
-            ], className='header'),
-
-            # Overview stats
-            html.Div(id='overview-container'),
-
-            # Data backup controls
-            html.Div([
-                html.Div([
-                    html.Label("Data Backup:", style={'fontWeight': '600', 'marginRight': '10px', 'color': '#333'}),
-                    dcc.Dropdown(
-                        id='data-folder-dropdown',
-                        options=date_options,
-                        value=active_date,
-                        clearable=False,
-                        style={'width': '220px'}
-                    ),
-                    html.Div(id='active-date-banner', style={'color': '#666', 'marginLeft': '12px', 'fontWeight': '500', 'fontSize': '0.9rem'}),
-                ], style={'display': 'flex', 'alignItems': 'center', 'flex': '1'}),
-
-                # Sync and Upload buttons
+                dcc.Store(id='backup-refresh-token', data=0, storage_type='memory'),
                 html.Div([
                     html.Div([
-                        # Sync from Anki button
-                        html.Button(
-                            '🔄 Sync from Anki',
-                            id='sync-from-anki-button',
-                            title='Sync directly from your local Anki installation',
-                            style={
-                                'padding': '8px 16px',
-                                'backgroundColor': COLORS['success'],
-                                'color': 'white',
-                                'border': 'none',
-                                'borderRadius': '6px',
-                                'cursor': 'pointer',
-                                'fontSize': '14px',
-                                'fontWeight': '500',
-                                'transition': 'background-color 0.2s',
-                                'marginRight': '10px'
-                            }
-                        ),
-                        # Upload button
-                        dcc.Upload(
-                            id='upload-backup-button',
-                            accept='.apkg',
-                            children=html.Button(
-                                '📤 Upload New Backup',
-                                title='Upload an .apkg file to add a new backup',
+                        html.H1("📚 Anki Learning Dashboard"),
+                        html.P("Interactive analysis of your learning journey and memory states")
+                    ], style={'flex': '1', 'textAlign': 'center'}),
+                    # Sync and Upload buttons
+                    html.Div([
+                        html.Div([
+                            html.Button(
+                                '🔄 Sync from Anki',
+                                id='sync-from-anki-button',
+                                title='Sync directly from your local Anki installation',
                                 style={
                                     'padding': '8px 16px',
-                                    'backgroundColor': COLORS['primary'],
+                                    'backgroundColor': COLORS['success'],
                                     'color': 'white',
                                     'border': 'none',
                                     'borderRadius': '6px',
                                     'cursor': 'pointer',
                                     'fontSize': '14px',
                                     'fontWeight': '500',
-                                    'transition': 'background-color 0.2s'
+                                    'transition': 'background-color 0.2s',
+                                    'marginRight': '10px'
                                 }
-                            )
+                            ),
+                            dcc.Upload(
+                                id='upload-backup-button',
+                                accept='.apkg',
+                                children=html.Button(
+                                    '📤 Upload Backup',
+                                    title='Upload an .apkg file',
+                                    style={
+                                        'padding': '8px 16px',
+                                        'backgroundColor': COLORS['primary'],
+                                        'color': 'white',
+                                        'border': 'none',
+                                        'borderRadius': '6px',
+                                        'cursor': 'pointer',
+                                        'fontSize': '14px',
+                                        'fontWeight': '500',
+                                        'transition': 'background-color 0.2s'
+                                    }
+                                )
+                            ),
+                        ], style={'display': 'flex', 'alignItems': 'center'}),
+                        html.Div(
+                            id='upload-status-message',
+                            style={'display': 'none'}
                         ),
-                    ], style={'display': 'flex', 'alignItems': 'center'}),
-                    # Status message (shared by both sync and upload)
-                    html.Div(
-                        id='upload-status-message',
-                        style={'display': 'none'}
-                    ),
-                    # Auto-dismiss interval (triggers 3 seconds after message shown)
-                    dcc.Interval(
-                        id='upload-message-interval',
-                        interval=3000,  # 3 seconds
-                        n_intervals=0,
-                        max_intervals=1,  # Only fire once
-                        disabled=True  # Start disabled
-                    ),
-                ], style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'flex-end'}),
-            ], className='backup-controls'),
+                        dcc.Interval(
+                            id='upload-message-interval',
+                            interval=3000,
+                            n_intervals=0,
+                            max_intervals=1,
+                            disabled=True
+                        ),
+                    ], style={'display': 'flex', 'flexDirection': 'column', 'alignItems': 'flex-end', 'position': 'absolute', 'right': '20px', 'top': '50%', 'transform': 'translateY(-50%)'}),
+                ], style={'position': 'relative', 'display': 'flex', 'alignItems': 'center'})
+            ], className='header'),
+
+            # Overview stats
+            html.Div(id='overview-container'),
 
             # Tabs
             html.Div([

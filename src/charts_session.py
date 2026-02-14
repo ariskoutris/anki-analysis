@@ -8,11 +8,6 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 from .constants import COLORS
-from .data_loader import (
-    get_future_load_forecast,
-    get_card_data,
-    get_historical_average_reviews,
-)
 
 
 def get_time_period_markers(df, date_col='date'):
@@ -385,17 +380,12 @@ def create_memory_decay_chart(df):
     return fig
 
 
-def create_future_load_chart(days_ahead=60):
-    """Create future review load forecast chart with capacity line"""
-    df = get_future_load_forecast(days_ahead)
-
+def create_future_load_chart(df, days_ahead=60, avg_capacity=0):
+    """Create future review load forecast chart with optional capacity line."""
     if df.empty:
         return go.Figure()
 
     fig = go.Figure()
-
-    # Get historical average for capacity line
-    avg_capacity = get_historical_average_reviews()
 
     # Daily due counts
     fig.add_trace(go.Bar(

@@ -5,7 +5,8 @@ All @callback decorators register against the global Dash app instance.
 
 import base64
 import os
-from dash import dcc, html, Input, Output, State, callback, ctx
+import time
+from dash import dcc, html, Input, Output, State, callback, ctx, no_update
 
 from .constants import COLORS
 from .upload_handler import process_apkg_upload
@@ -34,17 +35,14 @@ from .data_loader import (
     get_daily_reviews,
     get_review_intervals,
     get_card_data,
+    get_future_load_forecast,
+    get_historical_average_reviews,
     get_overview_stats,
     get_memory_state_summary,
     get_session_summary_stats,
     get_workload_summary,
     get_knowledge_health_stats,
     get_leech_candidates,
-)
-from src.config import (
-    get_active_date,
-    get_available_dates as get_config_available_dates,
-    set_active_date,
 )
 
 
@@ -63,23 +61,13 @@ def parse_time_range(time_range):
 # ---------------------------------------------------------------------------
 
 @callback(
-    [Output('overview-container', 'children'), Output('active-date-banner', 'children')],
-    [Input('data-folder-dropdown', 'value')],
-    [State('ui-store', 'data')],
+    Output('overview-container', 'children'),
+    [Input('backup-refresh-token', 'data'),
+     Input('url', 'pathname')],
     prevent_initial_call=False
 )
-def update_overview_container(selected_date, ui_store):
-    """Dynamically populate the overview statistics section when the selected data folder changes."""
-    banner = ''
-    if selected_date:
-        set_active_date(selected_date)
-        banner = f"Active backup: {selected_date}"
-    elif not get_active_date():
-        dates = get_config_available_dates()
-        if dates:
-            set_active_date(dates[0])
-            banner = f"Active backup: {dates[0]}"
-
+def update_overview_container(_refresh_token, _url):
+    """Dynamically populate the overview statistics section."""
     stats = get_overview_stats()
     memory = get_memory_state_summary()
 
@@ -104,7 +92,7 @@ def update_overview_container(selected_date, ui_store):
         ], style={'display': 'flex', 'marginBottom': '20px'}),
     ])
 
-    return overview_div, banner
+    return overview_div
 
 
 # ---------------------------------------------------------------------------
@@ -135,10 +123,6 @@ def load_ui_from_store(_, ui_store):
     session = ui_store.get('session_time_range', defaults['session_time_range'])
     retr = ui_store.get('retrievability_filter', defaults['retrievability_filter'])
     diff = ui_store.get('difficulty_filter', defaults['difficulty_filter'])
-
-    backup = ui_store.get('data_backup')
-    if backup:
-        set_active_date(backup)
 
     return session, retr, diff
 
@@ -194,20 +178,6 @@ def toggle_xaxis_mode(dates_clicks, sessions_clicks, _, ui_store):
 
 
 # ---------------------------------------------------------------------------
-# Callback: Refresh data folder dropdown
-# ---------------------------------------------------------------------------
-
-@callback(
-    Output('data-folder-dropdown', 'options'),
-    [Input('url', 'pathname')]
-)
-def refresh_data_folder_dropdown(_):
-    """Refresh the dropdown options from the filesystem on page load."""
-    dates = get_config_available_dates()
-    return [{'label': d, 'value': d} for d in dates]
-
-
-# ---------------------------------------------------------------------------
 # Callback: Save UI preferences
 # ---------------------------------------------------------------------------
 
@@ -223,36 +193,11 @@ def refresh_data_folder_dropdown(_):
 )
 def save_ui_to_store(session_value, xaxis_value, retr_value, diff_value):
     """Persist UI preferences to local storage whenever any preference changes."""
-    current_store = ctx.states.get('ui-store.data', {}) if hasattr(ctx, 'states') else {}
-
     return {
         'session_time_range': session_value or 'all',
         'xaxis_mode': xaxis_value or 'dates',
         'retrievability_filter': retr_value or [0, 100],
         'difficulty_filter': diff_value or [0, 10],
-        'data_backup': current_store.get('data_backup', get_active_date())
-    }
-
-
-# ---------------------------------------------------------------------------
-# Callback: Save data backup selection
-# ---------------------------------------------------------------------------
-
-@callback(
-    Output('ui-store', 'data', allow_duplicate=True),
-    [Input('data-folder-dropdown', 'value')],
-    prevent_initial_call=True
-)
-def save_data_backup_to_store(backup_value):
-    """Persist data backup selection separately to avoid circular dependencies."""
-    current_store = ctx.states.get('ui-store.data', {}) if hasattr(ctx, 'states') else {}
-
-    return {
-        'session_time_range': current_store.get('session_time_range', 'all'),
-        'xaxis_mode': current_store.get('xaxis_mode', 'dates'),
-        'retrievability_filter': current_store.get('retrievability_filter', [0, 100]),
-        'difficulty_filter': current_store.get('difficulty_filter', [0, 10]),
-        'data_backup': backup_value or get_active_date()
     }
 
 
@@ -264,10 +209,9 @@ def save_data_backup_to_store(backup_value):
     [
         Output('upload-status-message', 'children'),
         Output('upload-status-message', 'style'),
-        Output('data-folder-dropdown', 'options', allow_duplicate=True),
-        Output('data-folder-dropdown', 'value', allow_duplicate=True),
         Output('upload-message-interval', 'disabled'),
         Output('upload-message-interval', 'n_intervals'),
+        Output('backup-refresh-token', 'data', allow_duplicate=True),
     ],
     [Input('upload-backup-button', 'contents')],
     [
@@ -277,10 +221,10 @@ def save_data_backup_to_store(backup_value):
 )
 def handle_backup_upload(contents, filename):
     """
-    Process uploaded .apkg file: validate, extract, decompress, and add to backups.
+    Process uploaded .apkg file: validate, extract, decompress, and write to data/anki.db.
     """
     if not contents:
-        return "", {'display': 'none'}, [], None, True, 0
+        return "", {'display': 'none'}, True, 0, no_update
 
     # Validate file extension
     if not filename or not filename.lower().endswith('.apkg'):
@@ -293,7 +237,7 @@ def handle_backup_upload(contents, filename):
             'fontSize': '13px',
             'marginTop': '10px'
         }
-        return "❌ Invalid file format. Please upload an .apkg file.", error_style, [], None, False, 0
+        return "❌ Invalid file format. Please upload an .apkg file.", error_style, False, 0, no_update
 
     try:
         # Decode base64 contents
@@ -306,16 +250,9 @@ def handle_backup_upload(contents, filename):
         data_dir = os.path.join(project_dir, 'data')
 
         # Process upload
-        success, message, folder_name = process_apkg_upload(file_bytes, data_dir)
+        success, message = process_apkg_upload(file_bytes, data_dir)
 
         if success:
-            # Update active date
-            set_active_date(folder_name)
-
-            # Refresh dropdown options
-            dates = get_config_available_dates()
-            options = [{'label': d, 'value': d} for d in dates]
-
             success_style = {
                 'display': 'block',
                 'padding': '8px 12px',
@@ -325,7 +262,7 @@ def handle_backup_upload(contents, filename):
                 'fontSize': '13px',
                 'marginTop': '10px'
             }
-            return f"✅ {message}", success_style, options, folder_name, False, 0
+            return f"✅ {message}", success_style, False, 0, time.time()
         else:
             error_style = {
                 'display': 'block',
@@ -336,7 +273,7 @@ def handle_backup_upload(contents, filename):
                 'fontSize': '13px',
                 'marginTop': '10px'
             }
-            return f"❌ {message}", error_style, [], None, False, 0
+            return f"❌ {message}", error_style, False, 0, no_update
 
     except Exception as e:
         error_style = {
@@ -348,7 +285,7 @@ def handle_backup_upload(contents, filename):
             'fontSize': '13px',
             'marginTop': '10px'
         }
-        return f"❌ Upload error: {str(e)}", error_style, [], None, False, 0
+        return f"❌ Upload error: {str(e)}", error_style, False, 0, no_update
 
 
 # ---------------------------------------------------------------------------
@@ -359,10 +296,9 @@ def handle_backup_upload(contents, filename):
     [
         Output('upload-status-message', 'children', allow_duplicate=True),
         Output('upload-status-message', 'style', allow_duplicate=True),
-        Output('data-folder-dropdown', 'options', allow_duplicate=True),
-        Output('data-folder-dropdown', 'value', allow_duplicate=True),
         Output('upload-message-interval', 'disabled', allow_duplicate=True),
         Output('upload-message-interval', 'n_intervals', allow_duplicate=True),
+        Output('backup-refresh-token', 'data', allow_duplicate=True),
     ],
     [Input('sync-from-anki-button', 'n_clicks')],
     prevent_initial_call=True
@@ -372,16 +308,16 @@ def handle_anki_sync(n_clicks):
     Sync Anki collection from local installation.
     """
     if not n_clicks:
-        return "", {'display': 'none'}, [], None, True, 0
-    
+        return "", {'display': 'none'}, True, 0, no_update
+
     # Get project root and data directory
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_dir = os.path.dirname(script_dir)
     data_dir = os.path.join(project_dir, 'data')
-    
+
     # Check sync availability
     sync_info = get_sync_info()
-    
+
     if not sync_info['anki_installed']:
         error_style = {
             'display': 'block',
@@ -394,9 +330,9 @@ def handle_anki_sync(n_clicks):
         }
         return (
             "⚠️ Anki installation not found. Please ensure Anki is installed on this system.",
-            error_style, [], None, False, 0
+            error_style, False, 0, no_update
         )
-    
+
     if sync_info['profiles_found'] == 0:
         error_style = {
             'display': 'block',
@@ -409,9 +345,9 @@ def handle_anki_sync(n_clicks):
         }
         return (
             f"⚠️ No Anki profiles found in {sync_info['anki_path']}",
-            error_style, [], None, False, 0
+            error_style, False, 0, no_update
         )
-    
+
     if sync_info['anki_running']:
         error_style = {
             'display': 'block',
@@ -424,21 +360,14 @@ def handle_anki_sync(n_clicks):
         }
         return (
             "❌ Anki is currently running. Please close Anki before syncing to avoid database conflicts.",
-            error_style, [], None, False, 0
+            error_style, False, 0, no_update
         )
-    
+
     # Perform sync
     try:
-        success, message, folder_name = sync_from_anki(None, data_dir)
-        
+        success, message = sync_from_anki(None, data_dir)
+
         if success:
-            # Update active date
-            set_active_date(folder_name)
-            
-            # Refresh dropdown options
-            dates = get_config_available_dates()
-            options = [{'label': d, 'value': d} for d in dates]
-            
             success_style = {
                 'display': 'block',
                 'padding': '8px 12px',
@@ -448,7 +377,7 @@ def handle_anki_sync(n_clicks):
                 'fontSize': '13px',
                 'marginTop': '10px'
             }
-            return f"✅ {message}", success_style, options, folder_name, False, 0
+            return f"✅ {message}", success_style, False, 0, time.time()
         else:
             error_style = {
                 'display': 'block',
@@ -459,8 +388,8 @@ def handle_anki_sync(n_clicks):
                 'fontSize': '13px',
                 'marginTop': '10px'
             }
-            return f"❌ {message}", error_style, [], None, False, 0
-            
+            return f"❌ {message}", error_style, False, 0, no_update
+
     except Exception as e:
         error_style = {
             'display': 'block',
@@ -471,7 +400,7 @@ def handle_anki_sync(n_clicks):
             'fontSize': '13px',
             'marginTop': '10px'
         }
-        return f"❌ Sync error: {str(e)}", error_style, [], None, False, 0
+        return f"❌ Sync error: {str(e)}", error_style, False, 0, no_update
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +420,8 @@ def auto_dismiss_upload_message(n):
     return {'display': 'none'}, True
 
 
-# ---------------------------------------------------------------------------# Callback: Update session charts
+# ---------------------------------------------------------------------------
+# Callback: Update session charts
 # ---------------------------------------------------------------------------
 
 @callback(
@@ -505,26 +435,22 @@ def auto_dismiss_upload_message(n):
     ],
     [Input('session-time-range', 'value'),
      Input('xaxis-mode', 'data'),
-     Input('data-folder-dropdown', 'value')],
+     Input('backup-refresh-token', 'data')],
     [State('ui-store', 'data')],
     prevent_initial_call=False
 )
-def update_session_charts(time_range, xaxis_mode, selected_date, ui_store):
-    """Update session charts based on time range selection, x-axis mode, and selected data folder"""
-    if selected_date:
-        set_active_date(selected_date)
-    elif not get_active_date():
-        dates = get_config_available_dates()
-        if dates:
-            set_active_date(dates[0])
-
+def update_session_charts(time_range, xaxis_mode, _refresh_token, ui_store):
+    """Update session charts based on time range selection and x-axis mode"""
     use_sessions = (xaxis_mode == 'sessions')
     review_days, year_filter = parse_time_range(time_range)
+    forecast_days = 60
 
     session_df = get_session_data(review_days, year_filter)
     hourly_df = get_hourly_stats(review_days, year_filter)
     daily_df = get_daily_reviews(review_days, year_filter)
     interval_df = get_review_intervals(review_days, year_filter)
+    forecast_df = get_future_load_forecast(forecast_days)
+    avg_capacity = get_historical_average_reviews()
 
     empty_msg = html.Div("No session data available for the selected time range.",
                         style={'textAlign': 'center', 'padding': '30px', 'color': '#666'})
@@ -533,8 +459,13 @@ def update_session_charts(time_range, xaxis_mode, selected_date, ui_store):
         return empty_msg, [], empty_msg, [], empty_msg, []
 
     # Get summary statistics
-    session_stats = get_session_summary_stats(review_days, year_filter)
-    workload_stats = get_workload_summary()
+    session_stats = get_session_summary_stats(
+        review_days=review_days,
+        year_filter=year_filter,
+        session_df=session_df,
+        hourly_df=hourly_df
+    )
+    workload_stats = get_workload_summary(forecast_df=forecast_df)
 
     # Section 1: Study Volume & Consistency
     volume_summary = html.Div([
@@ -625,7 +556,7 @@ def update_session_charts(time_range, xaxis_mode, selected_date, ui_store):
     workload_charts = html.Div([
         html.Div([
             dcc.Graph(
-                figure=create_future_load_chart(60),
+                figure=create_future_load_chart(forecast_df, days_ahead=forecast_days, avg_capacity=avg_capacity),
                 config={'displayModeBar': False}
             )
         ], style={'flex': '1', 'padding': '0 10px'}),
@@ -653,19 +584,12 @@ def update_session_charts(time_range, xaxis_mode, selected_date, ui_store):
     ],
     [Input('retrievability-filter', 'value'),
      Input('difficulty-filter', 'value'),
-     Input('data-folder-dropdown', 'value')],
+     Input('backup-refresh-token', 'data')],
     [State('ui-store', 'data')],
     prevent_initial_call=False
 )
-def update_card_charts(ret_range, diff_range, selected_date, ui_store):
-    """Update card charts based on filters and selected data folder"""
-    if selected_date:
-        set_active_date(selected_date)
-    elif not get_active_date():
-        dates = get_config_available_dates()
-        if dates:
-            set_active_date(dates[0])
-
+def update_card_charts(ret_range, diff_range, _refresh_token, ui_store):
+    """Update card charts based on filters"""
     cards_df = get_card_data()
 
     empty_msg = html.Div("No card data available.",
@@ -785,4 +709,3 @@ def update_card_charts(ret_range, diff_range, selected_date, ui_store):
         maturity_summary, maturity_charts,
         problem_summary, problem_charts
     )
-
