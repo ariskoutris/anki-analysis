@@ -5,14 +5,31 @@ Entry point: creates the Dash app, sets layout, and registers callbacks.
 """
 
 import os
+import subprocess
+import sys
 import dash
-from src.config import get_active_date, get_available_dates as get_config_available_dates
 
 from .constants import INDEX_STRING
 from .layout import create_main_layout
+from .anki_sync import sync_from_anki
 
 # ---------------------------------------------------------------------------
-# 1. Create the Dash application
+# 1. Auto-sync from Anki on startup
+# ---------------------------------------------------------------------------
+data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
+os.makedirs(data_dir, exist_ok=True)
+
+try:
+    success, message = sync_from_anki(None, data_dir)
+    if success:
+        print(f"  Auto-sync: {message}")
+    else:
+        print(f"  Auto-sync skipped: {message}")
+except Exception as e:
+    print(f"  Auto-sync failed: {e}")
+
+# ---------------------------------------------------------------------------
+# 2. Create the Dash application
 # ---------------------------------------------------------------------------
 app = dash.Dash(
     __name__,
@@ -23,20 +40,17 @@ app = dash.Dash(
 app.index_string = INDEX_STRING
 
 # ---------------------------------------------------------------------------
-# 2. Compute initial state and set layout
+# 3. Set layout
 # ---------------------------------------------------------------------------
-DATE_OPTIONS = [{'label': d, 'value': d} for d in get_config_available_dates()]
-ACTIVE_DATE = get_active_date()
-
-app.layout = create_main_layout(DATE_OPTIONS, ACTIVE_DATE)
+app.layout = create_main_layout()
 
 # ---------------------------------------------------------------------------
-# 3. Register all callbacks (side-effect import)
+# 4. Register all callbacks (side-effect import)
 # ---------------------------------------------------------------------------
 from . import callbacks  # noqa: F401, E402
 
 # ---------------------------------------------------------------------------
-# 4. Entry point
+# 5. Entry point
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
     if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
@@ -47,4 +61,21 @@ if __name__ == '__main__':
         print("  Open http://127.0.0.1:8050 in your browser\n")
         print("=" * 60 + "\n")
 
-    app.run(debug=True, port=8050)
+    PORT = 8050
+    try:
+        app.run(debug=True, port=PORT)
+    except OSError as e:
+        if "Address already in use" in str(e) or e.errno == 48:
+            print(f"\n  Port {PORT} is already in use.")
+            try:
+                result = subprocess.run(
+                    ["lsof", "-i", f":{PORT}", "-sTCP:LISTEN", "-Pn"],
+                    capture_output=True, text=True
+                )
+                if result.stdout.strip():
+                    print(f"\n{result.stdout}")
+                    print(f"  Kill it with:  kill $(lsof -ti :{PORT})")
+            except FileNotFoundError:
+                pass
+            sys.exit(1)
+        raise

@@ -9,7 +9,6 @@ import sqlite3
 import zipfile
 import tempfile
 import shutil
-from datetime import datetime
 
 try:
     import zstandard as zstd
@@ -24,7 +23,7 @@ def decompress_anki21b(source_path: str, output_path: str) -> tuple[bool, str]:
 
     Args:
         source_path: Path to collection.anki21b file
-        output_path: Path where decompressed_anki21b.db will be saved
+        output_path: Path where decompressed database will be saved
 
     Returns:
         (success: bool, message: str) - Success status and descriptive message
@@ -124,40 +123,18 @@ def validate_apkg_contents(extracted_dir: str) -> tuple[bool, str]:
     return True, "All required files present"
 
 
-def generate_unique_date_folder(data_dir: str) -> str:
+def process_apkg_upload(file_contents: bytes, data_root: str) -> tuple[bool, str]:
     """
-    Generate a unique date-based folder name, adding timestamp if date already exists.
-
-    Args:
-        data_dir: Base data directory
-
-    Returns:
-        Unique folder name (YYYY-MM-DD or YYYY-MM-DD-HH-MM-SS)
-    """
-    base_folder = datetime.now().strftime('%Y-%m-%d')
-    folder_path = os.path.join(data_dir, base_folder)
-
-    if not os.path.exists(folder_path):
-        return base_folder
-
-    # Folder exists, add timestamp
-    timestamp = datetime.now().strftime('%H-%M-%S')
-    return f'{base_folder}-{timestamp}'
-
-
-def process_apkg_upload(file_contents: bytes, data_root: str) -> tuple[bool, str, str]:
-    """
-    Process uploaded .apkg file: extract, decompress, validate.
+    Process uploaded .apkg file: extract, decompress, validate, write to data/anki.db.
 
     Args:
         file_contents: Raw bytes of uploaded .apkg file
         data_root: Root data directory (e.g., 'data/')
 
     Returns:
-        (success: bool, message: str, folder_name: str) - Processing result and folder name
+        (success: bool, message: str) - Processing result
     """
     temp_dir = None
-    folder_name = None
 
     try:
         # Create temporary directory for extraction
@@ -173,54 +150,41 @@ def process_apkg_upload(file_contents: bytes, data_root: str) -> tuple[bool, str
             with zipfile.ZipFile(temp_apkg_path, 'r') as zip_ref:
                 zip_ref.extractall(temp_dir)
         except zipfile.BadZipFile:
-            return False, "Invalid or corrupted .apkg file", None
+            return False, "Invalid or corrupted .apkg file"
 
         # Validate contents
         valid, msg = validate_apkg_contents(temp_dir)
         if not valid:
-            return False, msg, None
+            return False, msg
 
-        # Generate unique folder name
-        folder_name = generate_unique_date_folder(data_root)
-        target_folder = os.path.join(data_root, folder_name)
+        # Decompress to a temp file first
+        temp_db = os.path.join(temp_dir, 'anki.db')
+        source_anki21b = os.path.join(temp_dir, 'collection.anki21b')
 
-        # Create target folder
-        os.makedirs(target_folder, exist_ok=True)
-
-        # Move files to target folder
-        files_to_move = ['collection.anki21b', 'collection.anki2', 'media', 'meta']
-        for item in files_to_move:
-            source = os.path.join(temp_dir, item)
-            if os.path.exists(source):
-                target = os.path.join(target_folder, item)
-                if os.path.isdir(source):
-                    shutil.copytree(source, target, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(source, target)
-
-        # Decompress collection.anki21b
-        source_anki21b = os.path.join(target_folder, 'collection.anki21b')
-        output_db = os.path.join(target_folder, 'decompressed_anki21b.db')
-
-        success, decompress_msg = decompress_anki21b(source_anki21b, output_db)
+        success, decompress_msg = decompress_anki21b(source_anki21b, temp_db)
         if not success:
-            # Clean up failed upload
-            shutil.rmtree(target_folder, ignore_errors=True)
-            return False, f"Decompression failed: {decompress_msg}", None
+            return False, f"Decompression failed: {decompress_msg}"
 
         # Validate database
-        valid, validate_msg = validate_database(output_db)
+        valid, validate_msg = validate_database(temp_db)
         if not valid:
-            # Clean up failed upload
-            shutil.rmtree(target_folder, ignore_errors=True)
-            return False, f"Database validation failed: {validate_msg}", None
+            return False, f"Database validation failed: {validate_msg}"
 
-        return True, f"Successfully uploaded backup as {folder_name}", folder_name
+        # Ensure data directory exists
+        os.makedirs(data_root, exist_ok=True)
+
+        # Atomic write: stage then rename
+        staging_path = os.path.join(data_root, '.anki.db.tmp')
+        target_path = os.path.join(data_root, 'anki.db')
+        shutil.copy2(temp_db, staging_path)
+        os.replace(staging_path, target_path)
+
+        return True, "Successfully uploaded and processed backup"
 
     except PermissionError as e:
-        return False, f"Permission error: {str(e)}", None
+        return False, f"Permission error: {str(e)}"
     except Exception as e:
-        return False, f"Upload processing error: {str(e)}", None
+        return False, f"Upload processing error: {str(e)}"
     finally:
         # Clean up temporary directory
         if temp_dir and os.path.exists(temp_dir):

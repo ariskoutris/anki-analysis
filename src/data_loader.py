@@ -9,21 +9,13 @@ import pandas as pd
 import numpy as np
 import json
 import math
-import os
-import sys
 from datetime import datetime, timedelta
-from functools import lru_cache
 
-from src.config import get_db_path as get_config_db_path
-
-
-def get_db_path():
-    """Get the path to the decompressed Anki database using the active date from config"""
-    return get_config_db_path()
+from src.config import get_db_path
 
 
 def connect_db():
-    """Connect to the decompressed Anki database"""
+    """Connect to the Anki database"""
     return sqlite3.connect(get_db_path())
 
 
@@ -770,9 +762,14 @@ def get_consistency_stats(review_days: int | None = None) -> dict:
     }
 
 
-def get_best_study_hour(review_days: int | None = None) -> int | None:
+def get_best_study_hour(
+    review_days: int | None = None,
+    year_filter: int | None = None,
+    hourly_df: pd.DataFrame | None = None
+) -> int | None:
     """Get the hour with highest success rate (min 20 reviews)."""
-    hourly_df = get_hourly_stats(review_days)
+    if hourly_df is None:
+        hourly_df = get_hourly_stats(review_days, year_filter)
     if hourly_df.empty:
         return None
 
@@ -815,15 +812,20 @@ def get_leech_candidates(min_lapses: int = 3, max_results: int = 20) -> pd.DataF
                     'retrievability', 'lapse_ratio', 'leech_score']]
 
 
-def get_workload_summary() -> dict:
+def get_workload_summary(
+    forecast_df: pd.DataFrame | None = None,
+    cards_df: pd.DataFrame | None = None
+) -> dict:
     """
     Get summary of upcoming workload for quick stats.
 
     Returns:
         Dictionary with workload metrics
     """
-    forecast_df = get_future_load_forecast(30)
-    cards_df = get_card_data()
+    if forecast_df is None:
+        forecast_df = get_future_load_forecast(30)
+    if cards_df is None:
+        cards_df = get_card_data()
 
     if forecast_df.empty:
         return {
@@ -908,13 +910,19 @@ def get_knowledge_health_stats() -> dict:
     }
 
 
-def get_session_summary_stats(review_days: int | None = None, year_filter: int | None = None) -> dict:
+def get_session_summary_stats(
+    review_days: int | None = None,
+    year_filter: int | None = None,
+    session_df: pd.DataFrame | None = None,
+    hourly_df: pd.DataFrame | None = None
+) -> dict:
     """
     Get summary statistics for session tab section cards.
     """
-    session_df = get_session_data(review_days, year_filter)
+    if session_df is None:
+        session_df = get_session_data(review_days, year_filter)
     consistency = get_consistency_stats(review_days)
-    best_hour = get_best_study_hour(review_days)
+    best_hour = get_best_study_hour(review_days, year_filter, hourly_df=hourly_df)
 
     if session_df.empty:
         return {
