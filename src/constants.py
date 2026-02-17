@@ -2,21 +2,26 @@
 Shared constants for the Anki Learning Dashboard.
 """
 
-# Color palette
+# Dark color palette
 COLORS = {
-    'primary': '#667eea',
-    'secondary': '#764ba2',
-    'success': '#06d6a0',
-    'warning': '#ffd166',
-    'danger': '#ef476f',
-    'info': '#118ab2',
-    'dark': '#073b4c',
-    'light': '#f8f9fa',
-    'critical': '#C73E1D',
-    'at_risk': '#F18F01',
-    'moderate': '#FFD23F',
-    'good': '#06A77D',
-    'excellent': '#0FA3B1',
+    'bg_canvas': '#0b0c0e',
+    'bg_primary': '#111217',
+    'bg_secondary': '#181b23',
+    'border': '#2a2d3a',
+    'text_primary': '#e0e0e0',
+    'text_secondary': '#8b8fa3',
+    'text_muted': '#5a5e72',
+    'primary': '#5b8dff',
+    'secondary': '#b07aff',
+    'success': '#2dd4a8',
+    'warning': '#f0b429',
+    'danger': '#f25f5c',
+    'info': '#29b6f6',
+    'critical': '#f25f5c',
+    'at_risk': '#f0973a',
+    'moderate': '#f0d264',
+    'good': '#2dd4a8',
+    'excellent': '#29b6f6',
 }
 
 # Memory state colors
@@ -28,6 +33,25 @@ MEMORY_COLORS = {
     'Excellent (95%+)': COLORS['excellent'],
 }
 
+# Shared dark chart layout
+DARK_CHART_LAYOUT = dict(
+    plot_bgcolor='#111217',
+    paper_bgcolor='#111217',
+    font=dict(color='#8b8fa3', size=11),
+    margin=dict(l=40, r=16, t=36, b=32),
+    legend=dict(
+        orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
+        font=dict(color='#8b8fa3', size=10),
+    ),
+)
+
+DARK_CHART_AXIS = dict(
+    showgrid=True, gridwidth=1, gridcolor='#2a2d3a',
+    zeroline=False,
+    tickfont=dict(color='#5a5e72', size=10),
+    title_font=dict(color='#8b8fa3', size=11),
+)
+
 # Custom HTML/CSS template for the Dash app
 INDEX_STRING = '''
 <!DOCTYPE html>
@@ -38,86 +62,243 @@ INDEX_STRING = '''
         {%favicon%}
         {%css%}
         <style>
+            *, *::before, *::after { box-sizing: border-box; }
+
             body {
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: #0b0c0e;
+                color: #e0e0e0;
                 min-height: 100vh;
                 margin: 0;
             }
-            .main-container {
-                max-width: 1600px;
+
+            /* Dashboard container */
+            .dashboard {
+                max-width: 1800px;
                 margin: 0 auto;
-                padding: 20px;
+                padding: 8px 12px;
             }
-            .header {
-                text-align: center;
-                color: white;
-                padding: 20px 0;
-            }
-            .header h1 {
-                margin: 0;
-                font-size: 2.5rem;
-                font-weight: 700;
-            }
-            .header p {
-                margin: 10px 0 0;
-                opacity: 0.9;
-            }
-            .stat-card {
-                background: white;
-                border-radius: 12px;
-                padding: 20px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                text-align: center;
-            }
-            .stat-value {
-                font-size: 2rem;
-                font-weight: 700;
-                color: #667eea;
-            }
-            .stat-label {
-                color: #666;
-                font-size: 0.9rem;
-                margin-top: 5px;
-            }
-            .card {
-                background: white;
-                border-radius: 12px;
-                padding: 20px;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                margin-bottom: 20px;
-            }
-            .tabs-container {
-                background: white;
-                border-radius: 12px;
-                padding: 0;
-                box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                overflow: hidden;
-            }
-            .custom-tabs {
-                border-bottom: 2px solid #eee;
-            }
-            .custom-tab {
-                padding: 15px 30px !important;
-                font-weight: 600 !important;
-            }
-            .custom-tab--selected {
-                border-top: none !important;
-                border-left: none !important;
-                border-right: none !important;
-                border-bottom: 3px solid #667eea !important;
-                color: #667eea !important;
-            }
-            .backup-controls {
-                background: white;
-                border-radius: 12px;
-                padding: 16px 20px;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.08);
-                margin-bottom: 20px;
+
+            /* Top bar */
+            .top-bar {
                 display: flex;
                 align-items: center;
-                justify-content: space-between;
-                gap: 20px;
+                gap: 16px;
+                padding: 8px 12px;
+                background: #111217;
+                border-bottom: 1px solid #2a2d3a;
+                border-radius: 4px;
+                margin-bottom: 8px;
+                flex-wrap: wrap;
+            }
+            .top-bar__title {
+                font-size: 14px;
+                font-weight: 600;
+                color: #e0e0e0;
+                margin-right: auto;
+                white-space: nowrap;
+            }
+            .top-bar__controls {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                flex-wrap: wrap;
+            }
+            .top-bar__separator {
+                width: 1px;
+                height: 24px;
+                background: #2a2d3a;
+            }
+            .top-bar__group {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .top-bar__label {
+                font-size: 11px;
+                color: #5a5e72;
+                white-space: nowrap;
+            }
+            .top-bar__slider {
+                width: 140px;
+            }
+            .top-bar__actions {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            /* Stat strip */
+            .stat-strip {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                padding: 6px 12px;
+                background: #111217;
+                border: 1px solid #2a2d3a;
+                border-radius: 4px;
+                margin-bottom: 8px;
+                flex-wrap: wrap;
+            }
+            .stat-strip__separator {
+                width: 1px;
+                height: 28px;
+                background: #2a2d3a;
+                margin: 0 4px;
+            }
+            .stat-item {
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                padding: 2px 10px;
+                min-width: 80px;
+            }
+            .stat-item__value {
+                font-size: 18px;
+                font-weight: 700;
+                line-height: 1.2;
+            }
+            .stat-item__label {
+                font-size: 10px;
+                color: #5a5e72;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                line-height: 1.3;
+            }
+            .stat-item--secondary .stat-item__value {
+                font-size: 14px;
+                font-weight: 600;
+            }
+            .stat-item--secondary .stat-item__label {
+                font-size: 9px;
+            }
+
+            /* Chart grid */
+            .chart-grid {
+                display: grid;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 8px;
+            }
+            .chart-panel {
+                background: #111217;
+                border: 1px solid #2a2d3a;
+                border-radius: 4px;
+                padding: 4px;
+                min-height: 0;
+            }
+            .chart-panel--wide {
+                grid-column: span 2;
+            }
+
+            /* Toast message */
+            .toast-msg {
+                position: fixed;
+                top: 12px;
+                right: 12px;
+                z-index: 1000;
+                padding: 8px 14px;
+                border-radius: 4px;
+                font-size: 12px;
+                max-width: 360px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            }
+
+            /* ---- Dash component dark overrides ---- */
+
+            /* Dropdown */
+            .Select-control {
+                background-color: #181b23 !important;
+                border-color: #2a2d3a !important;
+                color: #e0e0e0 !important;
+            }
+            .Select-menu-outer {
+                background-color: #181b23 !important;
+                border-color: #2a2d3a !important;
+            }
+            .VirtualizedSelectOption {
+                background-color: #181b23 !important;
+                color: #e0e0e0 !important;
+            }
+            .VirtualizedSelectFocusedOption {
+                background-color: #2a2d3a !important;
+            }
+            .Select-value-label {
+                color: #e0e0e0 !important;
+            }
+            .Select-placeholder {
+                color: #5a5e72 !important;
+            }
+            .Select-arrow-zone .Select-arrow {
+                border-top-color: #5a5e72 !important;
+            }
+            .Select.is-open > .Select-control .Select-arrow {
+                border-bottom-color: #5a5e72 !important;
+            }
+            .Select-input > input {
+                color: #e0e0e0 !important;
+            }
+            .Select--single > .Select-control .Select-value {
+                color: #e0e0e0 !important;
+            }
+            .has-value.Select--single > .Select-control .Select-value .Select-value-label {
+                color: #e0e0e0 !important;
+            }
+
+            /* RangeSlider */
+            .rc-slider-rail {
+                background-color: #2a2d3a !important;
+            }
+            .rc-slider-track {
+                background-color: #5b8dff !important;
+            }
+            .rc-slider-handle {
+                background-color: #5b8dff !important;
+                border-color: #5b8dff !important;
+            }
+            .rc-slider-dot {
+                background-color: #2a2d3a !important;
+                border-color: #2a2d3a !important;
+            }
+            .rc-slider-mark-text {
+                color: #5a5e72 !important;
+                font-size: 10px !important;
+            }
+            .rc-slider-tooltip-inner {
+                background-color: #181b23 !important;
+                color: #e0e0e0 !important;
+                border: 1px solid #2a2d3a !important;
+                box-shadow: none !important;
+            }
+            .rc-slider-tooltip-arrow {
+                display: none !important;
+            }
+
+            /* Responsive breakpoints */
+            @media (max-width: 1200px) {
+                .chart-grid {
+                    grid-template-columns: repeat(2, 1fr);
+                }
+                .chart-panel--wide {
+                    grid-column: span 2;
+                }
+            }
+            @media (max-width: 768px) {
+                .chart-grid {
+                    grid-template-columns: 1fr;
+                }
+                .chart-panel--wide {
+                    grid-column: span 1;
+                }
+                .top-bar {
+                    flex-direction: column;
+                    align-items: flex-start;
+                }
+                .top-bar__title {
+                    margin-right: 0;
+                }
+                .stat-strip {
+                    justify-content: center;
+                }
             }
         </style>
     </head>
