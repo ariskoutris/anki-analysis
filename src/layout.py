@@ -7,6 +7,7 @@ from datetime import datetime
 from dash import dcc, html
 
 from .constants import COLORS
+from .data_loader import get_deck_list
 
 
 CHART_HEIGHT = '280px'
@@ -41,12 +42,14 @@ def create_main_layout():
             'xaxis_mode': 'dates',
             'retrievability_filter': [0, 100],
             'difficulty_filter': [0, 10],
+            'deck_filter': 'all',
         }),
 
         html.Div([
             # ── Top Bar ──
             html.Div([
                 html.Div('Anki Dashboard', className='top-bar__title'),
+
 
                 html.Div([
                     # Time range dropdown
@@ -138,6 +141,21 @@ def create_main_layout():
 
                     html.Div(className='top-bar__separator'),
 
+                    # Deck filter
+                    html.Div([
+                        html.Span('Deck', className='top-bar__label'),
+                        dcc.Dropdown(
+                            id='deck-filter',
+                            options=[{'label': 'All Decks', 'value': 'all'}] + [
+                                {'label': d['name'], 'value': str(d['id'])}
+                                for d in get_deck_list()
+                            ],
+                            value='all',
+                            clearable=False,
+                            style={'width': '200px'},
+                        ),
+                    ], className='top-bar__group'),
+
                     # Actions
                     html.Div([
                         html.Button(
@@ -185,6 +203,7 @@ def create_main_layout():
             ], className='top-bar'),
 
             # ── Stat Strip ──
+
             html.Div([
                 # Primary stats (populated by callback)
                 html.Div(id='stat-upcoming'),

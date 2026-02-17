@@ -112,16 +112,18 @@ _TOAST_WARN = {
         Output('stat-avg-retrievability', 'children'),
     ],
     [Input('backup-refresh-token', 'data'),
-     Input('url', 'pathname')],
+     Input('url', 'pathname'),
+     Input('deck-filter', 'value')],
     prevent_initial_call=False
 )
-def update_overview_container(_refresh_token, _url):
+def update_overview_container(_refresh_token, _url, deck_value):
     """Populate the stat strip with current metrics."""
-    stats = get_overview_stats()
-    memory = get_memory_state_summary()
-    workload = get_workload_summary()
-    session_stats = get_session_summary_stats()
-    health = get_knowledge_health_stats()
+    deck_id = None if deck_value == 'all' else int(deck_value)
+    stats = get_overview_stats(deck_id=deck_id)
+    memory = get_memory_state_summary(deck_id=deck_id)
+    workload = get_workload_summary(deck_id=deck_id)
+    session_stats = get_session_summary_stats(deck_id=deck_id)
+    health = get_knowledge_health_stats(deck_id=deck_id)
 
     # Primary stats
     upcoming = create_stat_item(
@@ -160,7 +162,8 @@ def update_overview_container(_refresh_token, _url):
     [
         Output('session-time-range', 'value'),
         Output('retrievability-filter', 'value'),
-        Output('difficulty-filter', 'value')
+        Output('difficulty-filter', 'value'),
+        Output('deck-filter', 'value')
     ],
     [Input('url', 'pathname')],
     [State('ui-store', 'data')],
@@ -171,7 +174,8 @@ def load_ui_from_store(_, ui_store):
     defaults = {
         'session_time_range': 'all',
         'retrievability_filter': [0, 100],
-        'difficulty_filter': [0, 10]
+        'difficulty_filter': [0, 10],
+        'deck_filter': 'all'
     }
 
     if not ui_store:
@@ -180,8 +184,9 @@ def load_ui_from_store(_, ui_store):
     session = ui_store.get('session_time_range', defaults['session_time_range'])
     retr = ui_store.get('retrievability_filter', defaults['retrievability_filter'])
     diff = ui_store.get('difficulty_filter', defaults['difficulty_filter'])
+    deck = ui_store.get('deck_filter', defaults['deck_filter'])
 
-    return session, retr, diff
+    return session, retr, diff, deck
 
 
 # ---------------------------------------------------------------------------
@@ -249,17 +254,19 @@ def toggle_xaxis_mode(dates_clicks, sessions_clicks, _, ui_store):
         Input('session-time-range', 'value'),
         Input('xaxis-mode', 'data'),
         Input('retrievability-filter', 'value'),
-        Input('difficulty-filter', 'value')
+        Input('difficulty-filter', 'value'),
+        Input('deck-filter', 'value')
     ],
     prevent_initial_call=False
 )
-def save_ui_to_store(session_value, xaxis_value, retr_value, diff_value):
+def save_ui_to_store(session_value, xaxis_value, retr_value, diff_value, deck_value):
     """Persist UI preferences to local storage."""
     return {
         'session_time_range': session_value or 'all',
         'xaxis_mode': xaxis_value or 'dates',
         'retrievability_filter': retr_value or [0, 100],
         'difficulty_filter': diff_value or [0, 10],
+        'deck_filter': deck_value or 'all',
     }
 
 
@@ -382,21 +389,23 @@ def auto_dismiss_upload_message(n):
     ],
     [Input('session-time-range', 'value'),
      Input('xaxis-mode', 'data'),
-     Input('backup-refresh-token', 'data')],
+     Input('backup-refresh-token', 'data'),
+     Input('deck-filter', 'value')],
     [State('ui-store', 'data')],
     prevent_initial_call=False
 )
-def update_session_charts(time_range, xaxis_mode, _refresh_token, ui_store):
+def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value, ui_store):
     """Update session charts based on time range and x-axis mode."""
     use_sessions = (xaxis_mode == 'sessions')
     review_days, year_filter = parse_time_range(time_range)
+    deck_id = None if deck_value == 'all' else int(deck_value)
     forecast_days = 60
 
-    session_df = get_session_data(review_days, year_filter)
-    hourly_df = get_hourly_stats(review_days, year_filter)
-    daily_df = get_daily_reviews(review_days, year_filter)
-    forecast_df = get_future_load_forecast(forecast_days)
-    avg_capacity = get_historical_average_reviews()
+    session_df = get_session_data(review_days, year_filter, deck_id=deck_id)
+    hourly_df = get_hourly_stats(review_days, year_filter, deck_id=deck_id)
+    daily_df = get_daily_reviews(review_days, year_filter, deck_id=deck_id)
+    forecast_df = get_future_load_forecast(forecast_days, deck_id=deck_id)
+    avg_capacity = get_historical_average_reviews(deck_id=deck_id)
 
     import plotly.graph_objects as go
     empty = go.Figure()
@@ -434,13 +443,15 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, ui_store):
     ],
     [Input('retrievability-filter', 'value'),
      Input('difficulty-filter', 'value'),
-     Input('backup-refresh-token', 'data')],
+     Input('backup-refresh-token', 'data'),
+     Input('deck-filter', 'value')],
     [State('ui-store', 'data')],
     prevent_initial_call=False
 )
-def update_card_charts(ret_range, diff_range, _refresh_token, ui_store):
+def update_card_charts(ret_range, diff_range, _refresh_token, deck_value, ui_store):
     """Update card charts based on filters."""
-    cards_df = get_card_data()
+    deck_id = None if deck_value == 'all' else int(deck_value)
+    cards_df = get_card_data(deck_id=deck_id)
 
     import plotly.graph_objects as go
     empty = go.Figure()
