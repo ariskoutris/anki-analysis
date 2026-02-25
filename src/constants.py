@@ -38,7 +38,7 @@ DARK_CHART_LAYOUT = dict(
     plot_bgcolor='#111217',
     paper_bgcolor='#111217',
     font=dict(color='#8b8fa3', size=11),
-    margin=dict(l=40, r=16, t=36, b=32),
+    margin=dict(l=40, r=32, t=36, b=32),
     legend=dict(
         orientation='h', yanchor='bottom', y=1.02, xanchor='right', x=1,
         font=dict(color='#8b8fa3', size=10),
