@@ -226,10 +226,6 @@ def create_success_rate_chart(df, use_sessions=False):
         hovertemplate=hover_ma
     ))
 
-    fig.add_hline(y=90, line_dash="dash", line_color=COLORS['success'],
-                  annotation_text="Target 90%", annotation_position="right",
-                  annotation=dict(font=dict(color=COLORS['text_muted'], size=10)))
-
     fig.update_layout(
         title='Recall Rate',
         xaxis_title=x_title,
@@ -278,11 +274,6 @@ def create_efficiency_chart(df, use_sessions=False):
         hovertemplate=hover_template
     ))
 
-    avg_speed = df_sorted['cards_per_minute'].mean()
-    fig.add_hline(y=avg_speed, line_dash="dash", line_color=COLORS['warning'],
-                  annotation_text=f"Avg: {avg_speed:.1f}", annotation_position="right",
-                  annotation=dict(font=dict(color=COLORS['text_muted'], size=10)))
-
     fig.update_layout(
         title='Review Speed',
         xaxis_title=x_title,
@@ -299,8 +290,8 @@ def create_efficiency_chart(df, use_sessions=False):
     return fig
 
 
-def create_future_load_chart(df, days_ahead=60, avg_capacity=0):
-    """Create future review load forecast chart with optional capacity line."""
+def create_future_load_chart(df, days_ahead=60):
+    """Create future review load forecast chart."""
     if df.empty:
         return go.Figure()
 
@@ -328,17 +319,6 @@ def create_future_load_chart(df, days_ahead=60, avg_capacity=0):
         line=dict(color=COLORS['primary'], width=3),
         hovertemplate='%{x|%b %d}<br>Avg: %{y:.0f} cards<extra></extra>'
     ))
-
-    if avg_capacity > 0:
-        fig.add_hline(
-            y=avg_capacity,
-            line_dash="dash",
-            line_color=COLORS['info'],
-            opacity=0.8,
-            annotation_text=f"Avg Capacity ({avg_capacity:.0f})",
-            annotation_position="top right",
-            annotation=dict(font=dict(color=COLORS['text_muted'], size=10))
-        )
 
     fig.update_layout(
         title=f'Forecast ({days_ahead}d)',

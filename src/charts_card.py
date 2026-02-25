@@ -3,8 +3,8 @@ Card chart builders for the Anki Learning Dashboard.
 All functions are pure: DataFrame in, Plotly Figure out.
 """
 
-import pandas as pd
-import numpy as np
+# TODO: Refactor chart code organization. There is no distinction between card and session charts anymore.
+
 import plotly.graph_objects as go
 
 from .constants import COLORS, MEMORY_COLORS, DARK_CHART_LAYOUT, DARK_CHART_AXIS
@@ -33,14 +33,14 @@ def create_memory_state_chart(df):
         textinfo='percent+value',
         textposition='inside',
         insidetextorientation='horizontal',
-        textfont=dict(color='#e0e0e0', size=11),
+        textfont=dict(color='#1a1a2e', size=11),
         hovertemplate='%{label}<br>Cards: %{value}<br>Percentage: %{percent}<extra></extra>',
         sort=False
     )])
 
     fig.update_layout(
         title='Memory State',
-        margin=dict(l=20, r=20, t=36, b=60),
+        margin=dict(l=20, r=20, t=36, b=80),
         paper_bgcolor='#111217',
         plot_bgcolor='#111217',
         font=dict(color='#8b8fa3', size=11),
@@ -68,21 +68,13 @@ def create_retrievability_distribution_chart(df):
         hovertemplate='Retrievability: %{x:.0f}%<br>Cards: %{y}<extra></extra>'
     ))
 
-    fig.add_vline(x=90, line_dash="dash", line_color=COLORS['success'],
-                  annotation_text="Target", annotation_position="top",
-                  annotation=dict(font=dict(color=COLORS['text_muted'], size=10)))
-    fig.add_vline(x=df['retrievability'].median(), line_dash="dash", line_color=COLORS['danger'],
-                  annotation_text=f"Median: {df['retrievability'].median():.0f}%",
-                  annotation_position="top left",
-                  annotation=dict(font=dict(color=COLORS['text_muted'], size=10)))
-
     fig.update_layout(
-        title='Retrievability Dist.',
+        title='Retrievability Distribution',
         xaxis_title='Retrievability (%)',
         yaxis_title='Cards',
         **DARK_CHART_LAYOUT,
     )
-    fig.update_xaxes(range=[0, 100], **DARK_CHART_AXIS)
+    fig.update_xaxes(rangemode='tozero', **DARK_CHART_AXIS)
     fig.update_yaxes(**DARK_CHART_AXIS)
 
     return fig
@@ -103,18 +95,13 @@ def create_stability_distribution_chart(df):
         hovertemplate='Stability: %{x:.1f} days<br>Cards: %{y}<extra></extra>'
     ))
 
-    median_stab = df['stability'].median()
-    fig.add_vline(x=median_stab, line_dash="dash", line_color=COLORS['danger'],
-                  annotation_text=f"Median: {median_stab:.0f}d", annotation_position="top",
-                  annotation=dict(font=dict(color=COLORS['text_muted'], size=10)))
-
     fig.update_layout(
-        title='Stability Dist.',
+        title='Stability Distribution',
         xaxis_title='Stability (days)',
         yaxis_title='Cards',
         **DARK_CHART_LAYOUT,
     )
-    fig.update_xaxes(**DARK_CHART_AXIS)
+    fig.update_xaxes(rangemode='tozero', **DARK_CHART_AXIS)
     fig.update_yaxes(**DARK_CHART_AXIS)
 
     return fig
@@ -135,18 +122,13 @@ def create_difficulty_distribution_chart(df):
         hovertemplate='Difficulty: %{x:.1f}<br>Cards: %{y}<extra></extra>'
     ))
 
-    median_diff = df['difficulty'].median()
-    fig.add_vline(x=median_diff, line_dash="dash", line_color=COLORS['danger'],
-                  annotation_text=f"Median: {median_diff:.1f}", annotation_position="top",
-                  annotation=dict(font=dict(color=COLORS['text_muted'], size=10)))
-
     fig.update_layout(
-        title='Difficulty Dist.',
+        title='Difficulty Distribution',
         xaxis_title='Difficulty (0-10)',
         yaxis_title='Cards',
         **DARK_CHART_LAYOUT,
     )
-    fig.update_xaxes(range=[0, 10], **DARK_CHART_AXIS)
+    fig.update_xaxes(rangemode='tozero', **DARK_CHART_AXIS)
     fig.update_yaxes(**DARK_CHART_AXIS)
 
     return fig
