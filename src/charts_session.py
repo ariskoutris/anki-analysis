@@ -175,51 +175,43 @@ def create_daily_reviews_chart(df, use_sessions=False):
 
 
 def create_hourly_chart(df):
-    """Create hour of day performance chart"""
+    """Create hour of day performance chart as horizontal bars colored by success rate."""
     if df.empty:
         return go.Figure()
 
     df = df.sort_values('hour')
     hour_labels = [f'{h}:00' for h in df['hour']]
 
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    fig = go.Figure()
 
-    fig.add_trace(
-        go.Bar(
-            x=hour_labels,
-            y=df['review_count'],
-            name='Reviews',
-            marker_color=COLORS['primary'],
-            opacity=0.7,
-            hovertemplate='%{x}<br>Reviews: %{y}<extra></extra>'
+    fig.add_trace(go.Bar(
+        y=hour_labels,
+        x=df['review_count'],
+        orientation='h',
+        marker=dict(
+            color=df['success_rate'],
+            colorscale=[[0, COLORS['danger']], [0.5, COLORS['warning']], [1, COLORS['success']]],
+            cmin=df['success_rate'].min() - 5,
+            cmax=min(df['success_rate'].max() + 5, 100),
+            colorbar=dict(
+                title=dict(text='Success %', font=dict(color='#8b8fa3', size=10)),
+                tickfont=dict(color='#5a5e72', size=9),
+                len=0.8,
+            ),
         ),
-        secondary_y=False
-    )
-
-    fig.add_trace(
-        go.Scatter(
-            x=hour_labels,
-            y=df['success_rate'],
-            name='Success Rate',
-            line=dict(color=COLORS['success'], width=3),
-            mode='lines+markers',
-            marker=dict(size=6),
-            hovertemplate='%{x}<br>Success: %{y:.1f}%<extra></extra>'
-        ),
-        secondary_y=True
-    )
+        hovertemplate='%{y}<br>Reviews: %{x:,}<br>Success: %{customdata:.1f}%<extra></extra>',
+        customdata=df['success_rate'],
+    ))
 
     fig.update_layout(
         title='Hourly Performance',
-        xaxis_title='Hour',
-        hovermode='x unified',
-        xaxis=dict(type='category'),
+        xaxis_title='Reviews',
+        hovermode='y unified',
+        yaxis=dict(type='category', autorange='reversed'),
         **DARK_CHART_LAYOUT,
     )
     fig.update_xaxes(**DARK_CHART_AXIS)
-    fig.update_yaxes(title_text='Reviews', type='log', secondary_y=False, **DARK_CHART_AXIS)
-    fig.update_yaxes(title_text='Success %', secondary_y=True, range=[0, 100],
-                     **DARK_CHART_AXIS)
+    fig.update_yaxes(**DARK_CHART_AXIS)
 
     return fig
 
