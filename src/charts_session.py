@@ -338,6 +338,14 @@ def create_future_load_chart(df, days_ahead=60):
     if df.empty:
         return go.Figure()
 
+    from datetime import timedelta
+    x_start = df['date'].min()
+    x_end = x_start + timedelta(days=60)
+
+    # Color scale based on the default 60-day view
+    df_view = df[df['date'] <= x_end]
+    cmax = df_view['due_count'].quantile(0.95) if len(df_view) > 0 else 50
+
     fig = go.Figure()
 
     fig.add_trace(go.Bar(
@@ -348,7 +356,7 @@ def create_future_load_chart(df, days_ahead=60):
             color=df['due_count'],
             colorscale=[[0, COLORS['success']], [0.5, COLORS['warning']], [1, COLORS['danger']]],
             cmin=0,
-            cmax=df['due_count'].quantile(0.95) if len(df) > 0 else 50,
+            cmax=cmax,
             showscale=False
         ),
         hovertemplate='%{x|%b %d}<br>Due: %{y} cards<extra></extra>'
@@ -356,21 +364,31 @@ def create_future_load_chart(df, days_ahead=60):
 
     fig.add_trace(go.Scatter(
         x=df['date'],
-        y=df['ma7'],
+        y=df['due_count'].cumsum(),
         mode='lines',
-        name='7-day avg',
-        line=dict(color=COLORS['primary'], width=3),
-        hovertemplate='%{x|%b %d}<br>Avg: %{y:.0f} cards<extra></extra>'
+        name='Cumulative',
+        line=dict(color=COLORS['primary'], width=2),
+        yaxis='y2',
+        hovertemplate='%{x|%b %d}<br>Cumulative: %{y:,}<extra></extra>'
     ))
 
     fig.update_layout(
-        title=f'Forecast ({days_ahead}d)',
+        title='Upcoming Reviews',
         xaxis_title='Date',
         yaxis_title='Cards Due',
+        yaxis2=dict(
+            title='Cumulative',
+            overlaying='y',
+            side='right',
+            showgrid=False,
+            zeroline=False,
+            tickfont=dict(color='#5a5e72', size=10),
+            title_font=dict(color='#8b8fa3', size=11),
+        ),
         hovermode='x unified',
         **DARK_CHART_LAYOUT,
     )
-    fig.update_xaxes(**DARK_CHART_AXIS)
+    fig.update_xaxes(range=[x_start, x_end], **DARK_CHART_AXIS)
     fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
 
     return fig

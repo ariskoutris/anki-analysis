@@ -387,7 +387,7 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value, ui
     use_sessions = (xaxis_mode == 'sessions')
     review_days, year_filter = parse_time_range(time_range)
     deck_id = None if deck_value == 'all' else int(deck_value)
-    forecast_days = 60
+    forecast_days = 365
 
     session_df = get_session_data(review_days, year_filter, deck_id=deck_id)
     hourly_df = get_hourly_stats(review_days, year_filter, deck_id=deck_id)
