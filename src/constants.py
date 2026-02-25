@@ -83,26 +83,27 @@ INDEX_STRING = '''
             .top-bar {
                 display: flex;
                 align-items: center;
-                gap: 16px;
-                padding: 8px 12px;
-                background: #111217;
-                border-bottom: 1px solid #2a2d3a;
+                padding: 6px 12px;
+                background: #181b23;
+                border: 1px solid #2a2d3a;
                 border-radius: 4px;
                 margin-bottom: 8px;
                 flex-wrap: wrap;
             }
             .top-bar__title {
-                font-size: 14px;
+                font-size: 15px;
                 font-weight: 600;
                 color: #e0e0e0;
-                margin-right: auto;
+                padding: 0 16px 0 4px;
                 white-space: nowrap;
             }
             .top-bar__controls {
                 display: flex;
                 align-items: center;
-                gap: 12px;
+                gap: 14px;
+                padding: 6px 14px;
                 flex-wrap: wrap;
+                margin-left: auto;
             }
             .top-bar__separator {
                 width: 1px;
@@ -118,9 +119,6 @@ INDEX_STRING = '''
                 font-size: 11px;
                 color: #5a5e72;
                 white-space: nowrap;
-            }
-            .top-bar__slider {
-                width: 140px;
             }
             .top-bar__actions {
                 display: flex;
@@ -205,72 +203,55 @@ INDEX_STRING = '''
 
             /* ---- Dash component dark overrides ---- */
 
-            /* Dropdown */
-            .Select-control {
+            /* Dropdown button */
+            button.dash-dropdown {
                 background-color: #181b23 !important;
-                border-color: #2a2d3a !important;
+                border: 1px solid #2a2d3a !important;
                 color: #e0e0e0 !important;
+                border-radius: 3px !important;
             }
-            .Select-menu-outer {
-                background-color: #181b23 !important;
-                border-color: #2a2d3a !important;
+            button.dash-dropdown:hover {
+                border-color: #5b8dff !important;
             }
-            .VirtualizedSelectOption {
-                background-color: #181b23 !important;
-                color: #e0e0e0 !important;
-            }
-            .VirtualizedSelectFocusedOption {
-                background-color: #2a2d3a !important;
-            }
-            .Select-value-label {
-                color: #e0e0e0 !important;
-            }
-            .Select-placeholder {
+            .dash-dropdown-trigger-icon {
                 color: #5a5e72 !important;
             }
-            .Select-arrow-zone .Select-arrow {
-                border-top-color: #5a5e72 !important;
-            }
-            .Select.is-open > .Select-control .Select-arrow {
-                border-bottom-color: #5a5e72 !important;
-            }
-            .Select-input > input {
-                color: #e0e0e0 !important;
-            }
-            .Select--single > .Select-control .Select-value {
-                color: #e0e0e0 !important;
-            }
-            .has-value.Select--single > .Select-control .Select-value .Select-value-label {
+            .dash-dropdown-value,
+            .dash-dropdown-value-item {
                 color: #e0e0e0 !important;
             }
 
-            /* RangeSlider */
-            .rc-slider-rail {
-                background-color: #2a2d3a !important;
+            /* Dropdown menu (popover content) */
+            .dash-dropdown-content {
+                background-color: #181b23 !important;
+                border: 1px solid #2a2d3a !important;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.5) !important;
             }
-            .rc-slider-track {
-                background-color: #5b8dff !important;
-            }
-            .rc-slider-handle {
-                background-color: #5b8dff !important;
-                border-color: #5b8dff !important;
-            }
-            .rc-slider-dot {
-                background-color: #2a2d3a !important;
+            .dash-dropdown-search-container {
+                background-color: #111217 !important;
                 border-color: #2a2d3a !important;
             }
-            .rc-slider-mark-text {
-                color: #5a5e72 !important;
-                font-size: 10px !important;
+            .dash-dropdown-search {
+                background-color: #111217 !important;
+                border-color: #2a2d3a !important;
+                color: #e0e0e0 !important;
             }
-            .rc-slider-tooltip-inner {
+            .dash-dropdown-search::placeholder {
+                color: #5a5e72 !important;
+            }
+            .dash-dropdown-search-icon {
+                color: #5a5e72 !important;
+            }
+            .dash-dropdown-option {
                 background-color: #181b23 !important;
                 color: #e0e0e0 !important;
-                border: 1px solid #2a2d3a !important;
-                box-shadow: none !important;
             }
-            .rc-slider-tooltip-arrow {
-                display: none !important;
+            .dash-dropdown-option:hover,
+            .dash-dropdown-option[data-highlighted] {
+                background-color: #2a2d3a !important;
+            }
+            .dash-dropdown-option[data-state="checked"] {
+                color: #5b8dff !important;
             }
 
             /* Responsive breakpoints */

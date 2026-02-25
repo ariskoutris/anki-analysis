@@ -3,7 +3,6 @@ Layout builders for the Anki Learning Dashboard.
 Single-page dark Grafana-style grid layout.
 """
 
-from datetime import datetime
 from dash import dcc, html
 
 from .constants import COLORS
@@ -25,12 +24,6 @@ def create_stat_item(value, label, color=COLORS['text_primary'], secondary=False
 def create_main_layout():
     """Assemble the full single-page grid layout."""
 
-    current_year = datetime.now().year
-    year_options = [
-        {'label': f'Year {year}', 'value': f'year_{year}'}
-        for year in range(current_year - 1, 2019, -1)
-    ]
-
     return html.Div([
         # Hidden stores
         dcc.Location(id='url', refresh=True),
@@ -39,8 +32,6 @@ def create_main_layout():
         dcc.Store(id='ui-store', storage_type='local', data={
             'session_time_range': 'all',
             'xaxis_mode': 'dates',
-            'retrievability_filter': [0, 100],
-            'difficulty_filter': [0, 10],
             'deck_filter': 'all',
         }),
 
@@ -62,10 +53,12 @@ def create_main_layout():
                                 {'label': '30d', 'value': '30'},
                                 {'label': '90d', 'value': '90'},
                                 {'label': '180d', 'value': '180'},
+                                {'label': '365d', 'value': '365'},
                                 {'label': 'All', 'value': 'all'},
-                            ] + year_options,
+                            ],
                             value='all',
                             clearable=False,
+                            searchable=False,
                             style={'width': '100px'},
                         ),
                     ], className='top-bar__group'),
@@ -106,38 +99,6 @@ def create_main_layout():
                             },
                         ),
                     ], style={'display': 'flex'}),
-
-                    html.Div(className='top-bar__separator'),
-
-                    # Retrievability slider
-                    html.Div([
-                        html.Span('Ret.', className='top-bar__label'),
-                        html.Div(
-                            dcc.RangeSlider(
-                                id='retrievability-filter',
-                                min=0, max=100, step=5,
-                                value=[0, 100],
-                                marks={0: '0', 50: '50', 100: '100'},
-                                tooltip={'placement': 'bottom', 'always_visible': False},
-                            ),
-                            className='top-bar__slider',
-                        ),
-                    ], className='top-bar__group'),
-
-                    # Difficulty slider
-                    html.Div([
-                        html.Span('Diff.', className='top-bar__label'),
-                        html.Div(
-                            dcc.RangeSlider(
-                                id='difficulty-filter',
-                                min=0, max=10, step=0.5,
-                                value=[0, 10],
-                                marks={0: '0', 5: '5', 10: '10'},
-                                tooltip={'placement': 'bottom', 'always_visible': False},
-                            ),
-                            className='top-bar__slider',
-                        ),
-                    ], className='top-bar__group'),
 
                     html.Div(className='top-bar__separator'),
 

@@ -43,10 +43,7 @@ def parse_time_range(time_range):
     """Parse time range value into review_days and year_filter."""
     if time_range == 'all':
         return None, None
-    elif isinstance(time_range, str) and time_range.startswith('year_'):
-        return None, int(time_range.split('_')[1])
-    else:
-        return int(time_range) if time_range else None, None
+    return int(time_range) if time_range else None, None
 
 
 # Dark toast styles
@@ -160,8 +157,6 @@ def update_overview_container(_refresh_token, _url, deck_value):
 @callback(
     [
         Output('session-time-range', 'value'),
-        Output('retrievability-filter', 'value'),
-        Output('difficulty-filter', 'value'),
         Output('deck-filter', 'value')
     ],
     [Input('url', 'pathname')],
@@ -172,8 +167,6 @@ def load_ui_from_store(_, ui_store):
     """Load UI preferences from local storage on page load."""
     defaults = {
         'session_time_range': 'all',
-        'retrievability_filter': [0, 100],
-        'difficulty_filter': [0, 10],
         'deck_filter': 'all'
     }
 
@@ -181,11 +174,9 @@ def load_ui_from_store(_, ui_store):
         ui_store = defaults
 
     session = ui_store.get('session_time_range', defaults['session_time_range'])
-    retr = ui_store.get('retrievability_filter', defaults['retrievability_filter'])
-    diff = ui_store.get('difficulty_filter', defaults['difficulty_filter'])
     deck = ui_store.get('deck_filter', defaults['deck_filter'])
 
-    return session, retr, diff, deck
+    return session, deck
 
 
 # ---------------------------------------------------------------------------
@@ -252,19 +243,15 @@ def toggle_xaxis_mode(dates_clicks, sessions_clicks, _, ui_store):
     [
         Input('session-time-range', 'value'),
         Input('xaxis-mode', 'data'),
-        Input('retrievability-filter', 'value'),
-        Input('difficulty-filter', 'value'),
         Input('deck-filter', 'value')
     ],
     prevent_initial_call=False
 )
-def save_ui_to_store(session_value, xaxis_value, retr_value, diff_value, deck_value):
+def save_ui_to_store(session_value, xaxis_value, deck_value):
     """Persist UI preferences to local storage."""
     return {
         'session_time_range': session_value or 'all',
         'xaxis_mode': xaxis_value or 'dates',
-        'retrievability_filter': retr_value or [0, 100],
-        'difficulty_filter': diff_value or [0, 10],
         'deck_filter': deck_value or 'all',
     }
 
@@ -441,14 +428,12 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value, ui
         Output('chart-stability-dist', 'figure'),
         Output('chart-difficulty-dist', 'figure'),
     ],
-    [Input('retrievability-filter', 'value'),
-     Input('difficulty-filter', 'value'),
-     Input('backup-refresh-token', 'data'),
+    [Input('backup-refresh-token', 'data'),
      Input('deck-filter', 'value')],
     [State('ui-store', 'data')],
     prevent_initial_call=False
 )
-def update_card_charts(ret_range, diff_range, _refresh_token, deck_value, ui_store):
+def update_card_charts(_refresh_token, deck_value, ui_store):
     """Update card charts based on filters."""
     deck_id = None if deck_value == 'all' else int(deck_value)
     cards_df = get_card_data(deck_id=deck_id)
@@ -467,19 +452,9 @@ def update_card_charts(ret_range, diff_range, _refresh_token, deck_value, ui_sto
     if cards_df.empty:
         return empty, empty, empty, empty
 
-    # Filter for distribution charts
-    mask = (
-        (cards_df['retrievability'] >= ret_range[0]) &
-        (cards_df['retrievability'] <= ret_range[1]) &
-        (cards_df['difficulty'] >= diff_range[0]) &
-        (cards_df['difficulty'] <= diff_range[1])
-    )
-    filtered_df = cards_df[mask]
-
-    # Memory state uses unfiltered data; distributions use filtered
     fig_memory = create_memory_state_chart(cards_df)
-    fig_ret = create_retrievability_distribution_chart(filtered_df)
-    fig_stab = create_stability_distribution_chart(filtered_df)
-    fig_diff = create_difficulty_distribution_chart(filtered_df)
+    fig_ret = create_retrievability_distribution_chart(cards_df)
+    fig_stab = create_stability_distribution_chart(cards_df)
+    fig_diff = create_difficulty_distribution_chart(cards_df)
 
     return fig_memory, fig_ret, fig_stab, fig_diff
