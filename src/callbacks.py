@@ -31,7 +31,6 @@ from .data_loader import (
     get_daily_reviews,
     get_card_data,
     get_future_load_forecast,
-    get_historical_average_reviews,
     get_overview_stats,
     get_memory_state_summary,
     get_session_summary_stats,
@@ -289,7 +288,7 @@ def save_ui_to_store(session_value, xaxis_value, retr_value, diff_value, deck_va
 def handle_backup_upload(contents, filename):
     """Process uploaded .apkg file."""
     if not contents:
-        return "", {'display': 'none'}, True, 0, no_update
+        return "", {'display': 'none'}, False, 0, no_update
 
     if not filename or not filename.lower().endswith('.apkg'):
         return "Invalid file format. Upload an .apkg file.", _TOAST_ERROR, False, 0, no_update
@@ -331,7 +330,7 @@ def handle_backup_upload(contents, filename):
 def handle_anki_sync(n_clicks):
     """Sync Anki collection from local installation."""
     if not n_clicks:
-        return "", {'display': 'none'}, True, 0, no_update
+        return "", {'display': 'none'}, False, 0, no_update
 
     script_dir = os.path.dirname(os.path.abspath(__file__))
     project_dir = os.path.dirname(script_dir)
@@ -372,6 +371,8 @@ def handle_anki_sync(n_clicks):
 )
 def auto_dismiss_upload_message(n):
     """Hide the upload status message after 3 seconds."""
+    if not n:
+        return no_update, no_update
     return {'display': 'none'}, True
 
 
@@ -405,7 +406,6 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value, ui
     hourly_df = get_hourly_stats(review_days, year_filter, deck_id=deck_id)
     daily_df = get_daily_reviews(review_days, year_filter, deck_id=deck_id)
     forecast_df = get_future_load_forecast(forecast_days, deck_id=deck_id)
-    avg_capacity = get_historical_average_reviews(deck_id=deck_id)
 
     import plotly.graph_objects as go
     empty = go.Figure()
@@ -425,7 +425,7 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value, ui
     fig_hourly = create_hourly_chart(hourly_df)
     fig_recall = create_success_rate_chart(session_df, use_sessions=use_sessions)
     fig_speed = create_efficiency_chart(session_df, use_sessions=use_sessions)
-    fig_forecast = create_future_load_chart(forecast_df, days_ahead=forecast_days, avg_capacity=avg_capacity)
+    fig_forecast = create_future_load_chart(forecast_df, days_ahead=forecast_days)
 
     return fig_daily, fig_hourly, fig_recall, fig_speed, fig_forecast
 

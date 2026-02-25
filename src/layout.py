@@ -13,7 +13,6 @@ from .data_loader import get_deck_list
 CHART_HEIGHT = '280px'
 DARK_BG = {'backgroundColor': '#111217'}
 
-
 def create_stat_item(value, label, color=COLORS['text_primary'], secondary=False):
     """Create a compact stat indicator for the stat strip."""
     cls = 'stat-item stat-item--secondary' if secondary else 'stat-item'
@@ -46,10 +45,11 @@ def create_main_layout():
         }),
 
         html.Div([
+            # TODO: Improve top bar styling and layout
+
             # ── Top Bar ──
             html.Div([
                 html.Div('Anki Dashboard', className='top-bar__title'),
-
 
                 html.Div([
                     # Time range dropdown
@@ -198,7 +198,7 @@ def create_main_layout():
                 html.Div(id='upload-status-message', style={'display': 'none'}),
                 dcc.Interval(
                     id='upload-message-interval',
-                    interval=3000, n_intervals=0, max_intervals=1, disabled=True,
+                    interval=2000, n_intervals=0, max_intervals=1, disabled=True,
                 ),
             ], className='top-bar'),
 

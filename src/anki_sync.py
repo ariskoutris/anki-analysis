@@ -85,18 +85,26 @@ def is_anki_running() -> bool:
     system = platform.system()
 
     try:
-        if system in ("Linux", "Darwin"):
-            # Check for anki process more specifically
-            # Look for the actual Anki executable, not just any process with "anki" in the path
+        if system == "Darwin":
+            # macOS: Anki may run as a .app bundle or as a Python process via aqt
+            for pattern in ["Anki.app/Contents/MacOS", "aqt.run()"]:
+                result = subprocess.run(
+                    ["pgrep", "-f", pattern],
+                    capture_output=True,
+                    text=True
+                )
+                if result.stdout.strip():
+                    return True
+            return False
+        elif system == "Linux":
             result = subprocess.run(
-                ["pgrep", "-i", "^anki$"],
+                ["pgrep", "-xi", "anki"],
                 capture_output=True,
                 text=True
             )
-            # Also check for anki.bin (Linux package name)
             if not result.stdout.strip():
                 result = subprocess.run(
-                    ["pgrep", "-i", "^anki.bin$"],
+                    ["pgrep", "-xi", "anki.bin"],
                     capture_output=True,
                     text=True
                 )
