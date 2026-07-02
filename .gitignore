@@ -29,5 +29,5 @@ Thumbs.db
 *.swp
 *.swo
 
-# uv / virtual environment
+# Enviroment
 .venv/
