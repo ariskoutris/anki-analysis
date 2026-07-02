@@ -24,11 +24,18 @@ def get_anki_base_path() -> Optional[Path]:
     Returns:
         Path to Anki2 directory or None if not found
     """
+    env_base = os.environ.get("ANKI_BASE")
+    if env_base:
+        p = Path(env_base).expanduser()
+        return p if p.exists() else None
+
     system = platform.system()
     home = Path.home()
 
     if system == "Linux":
-        path = home / ".local" / "share" / "Anki2"
+        xdg = os.environ.get("XDG_DATA_HOME")
+        base = Path(xdg).expanduser() if xdg else home / ".local" / "share"
+        path = base / "Anki2"
     elif system == "Darwin":  # macOS
         path = home / "Library" / "Application Support" / "Anki2"
     elif system == "Windows":
