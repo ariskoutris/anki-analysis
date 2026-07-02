@@ -18,7 +18,8 @@ src/
   charts_card.py            – 4 card chart functions (pure: DataFrame → Figure)
   upload_handler.py         – .apkg file upload processing
   data_loader.py            – All SQL queries, FSRS calculations, DataFrame construction, summary stats
-requirements.txt            – numpy, zstandard, pandas, dash, plotly
+pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly); managed with uv
+uv.lock                     – Pinned dependency lockfile
 data/                       – Not tracked. Contains single anki.db snapshot
 ```
 
@@ -175,10 +176,10 @@ Charts support a date/session x-axis toggle. In session mode, sequential indices
 - Retrievability formula: `R = exp(ln(0.9) * days_since_review / stability)`
 - All SQL filters are built via `build_time_filter()` which returns a SQL fragment
 - Charts use a shared `COLORS` dict and `MEMORY_COLORS` dict for consistent styling (defined in `constants.py`)
-- All modules use relative imports (`from .constants import COLORS`); run via `python -m src.app`
+- All modules use relative imports (`from .constants import COLORS`); run via `uv run python -m src.app`
 
 ## Running
 
 ```bash
-python -m src.app            # starts on http://127.0.0.1:8050
+uv run python -m src.app     # starts on http://127.0.0.1:8050
 ```
