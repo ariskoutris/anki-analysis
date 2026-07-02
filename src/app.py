@@ -53,15 +53,16 @@ from . import callbacks  # noqa: F401, E402
 # 5. Entry point
 # ---------------------------------------------------------------------------
 if __name__ == '__main__':
+    PORT = int(os.environ.get('PORT', 8050))
+
     if os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
         print("\n" + "=" * 60)
         print("  Anki Learning Dashboard")
         print("=" * 60)
         print("\n  Starting server...")
-        print("  Open http://127.0.0.1:8050 in your browser\n")
+        print(f"  Open http://127.0.0.1:{PORT} in your browser\n")
         print("=" * 60 + "\n")
 
-    PORT = 8050
     try:
         app.run(debug=True, port=PORT)
     except OSError as e:

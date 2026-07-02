@@ -199,7 +199,7 @@ def sync_from_anki(profile_name: Optional[str], data_root: str) -> Tuple[bool, s
         collection_path = matching[0][1]
         selected_profile = profile_name
     else:
-        # Use first profile (usually "User 1")
+        # No profile specified: use the first one detected
         selected_profile, collection_path = profiles[0]
 
     # Safety check: Warn if Anki is running

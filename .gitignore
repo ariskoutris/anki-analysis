@@ -12,7 +12,6 @@ data/*
 *~
 
 # Agent instruction files
-CLAUDE.md
 AGENTS.md
 
 # OS specific files
