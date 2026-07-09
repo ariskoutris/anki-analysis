@@ -106,17 +106,31 @@ def create_retention_workload_chart(data):
     return fig
 
 
-def create_completion_chart(data, paces=(5, 10, 20), horizon_days=3 * 365):
+def create_completion_chart(data, default_pace=10, max_pace=30, horizon_days=3 * 365):
     """
-    Cumulative cards introduced + projected deck completion at candidate
-    new-card paces. Input from fsrs_engine.get_completion_projection.
+    Cumulative cards introduced + projected deck completion, with a
+    client-side pace slider (new cards/day) that redraws the projection.
+    Input from fsrs_engine.get_completion_projection.
     """
     curve = data['intro_curve']
     if curve.empty:
         return go.Figure()
 
     introduced = data['introduced']
-    total = introduced + data['remaining_new']
+    remaining = data['remaining_new']
+    total = introduced + remaining
+    today = curve['date'].iloc[-1]
+    horizon = today + pd.Timedelta(days=horizon_days)
+
+    def projection(pace):
+        """(x, y, label) for one pace scenario."""
+        days_needed = remaining / pace
+        end = today + pd.Timedelta(days=days_needed)
+        if days_needed <= horizon_days:
+            label = f"{pace}/day → {end.strftime('%b %Y')}"
+        else:
+            label = f"{pace}/day → {end.strftime('%Y')}"
+        return [today, end], [introduced, total], label
 
     fig = go.Figure()
 
@@ -136,35 +150,49 @@ def create_completion_chart(data, paces=(5, 10, 20), horizon_days=3 * 365):
                   annotation_text=f'deck: {total:,}',
                   annotation_font=dict(color='#8b8fa3', size=10))
 
-    # Projection scenarios (sequential opacity = pace magnitude)
-    today = curve['date'].iloc[-1]
-    remaining = data['remaining_new']
+    sliders = []
     if remaining > 0:
-        opacities = (0.35, 0.6, 0.95)
-        for pace, op in zip(paces, opacities):
-            days_needed = remaining / pace
-            if days_needed <= horizon_days:
-                end = today + pd.Timedelta(days=days_needed)
-                label = f"{pace}/day → {end.strftime('%b %Y')}"
-                end_y = total
-            else:
-                end = today + pd.Timedelta(days=horizon_days)
-                label = f'{pace}/day → beyond {end.year}'
-                end_y = introduced + pace * horizon_days
-            fig.add_trace(go.Scatter(
-                x=[today, end], y=[introduced, end_y],
-                name=label,
-                mode='lines',
-                line=dict(color=f'rgba(45, 212, 168, {op})', width=2, dash='dot'),
-                hovertemplate=label + '<extra></extra>',
-            ))
+        x0, y0, label0 = projection(default_pace)
+        fig.add_trace(go.Scatter(
+            x=x0, y=y0,
+            name=label0,
+            mode='lines',
+            line=dict(color=COLORS['success'], width=2, dash='dot'),
+            hovertemplate='%{x|%b %Y}: %{y:.0f} cards<extra></extra>',
+        ))
 
+        steps = []
+        for pace in range(1, max_pace + 1):
+            x, y, label = projection(pace)
+            steps.append(dict(
+                method='restyle',
+                label=str(pace),
+                args=[{'x': [x], 'y': [y], 'name': [label]}, [1]],
+            ))
+        sliders = [dict(
+            active=default_pace - 1,
+            steps=steps,
+            currentvalue=dict(prefix='New cards/day: ',
+                              font=dict(color='#e0e0e0', size=11)),
+            pad=dict(t=28, b=4),
+            len=0.9, x=0.05,
+            bgcolor='#2a2d3a',
+            activebgcolor='#5b8dff',
+            bordercolor='#2a2d3a',
+            tickcolor='#5a5e72',
+            font=dict(color='#5a5e72', size=8),
+        )]
+
+    layout = dict(DARK_CHART_LAYOUT)
+    layout['margin'] = dict(l=40, r=32, t=36, b=8)
     fig.update_layout(
         title='Deck Completion Projection',
         yaxis_title='Cards',
-        **DARK_CHART_LAYOUT,
+        sliders=sliders,
+        **layout,
     )
-    fig.update_xaxes(**DARK_CHART_AXIS)
+    # Fixed x-range so the slider doesn't rescale the axis on every step
+    fig.update_xaxes(range=[curve['date'].iloc[0], horizon], **DARK_CHART_AXIS)
     fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
 
     return fig
