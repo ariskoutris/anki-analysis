@@ -13,23 +13,39 @@ from .data_loader import get_deck_list
 CHART_HEIGHT = '280px'
 DARK_BG = {'backgroundColor': '#111217'}
 
-# Default grid layout: 12 columns, h units of rowHeight=62px (h=4 ≈ 280px incl. margins)
+# Grid discretization: 3 columns of equal thirds, so a row can only be
+# 1-1-1, 2-1, 1-2, or 3. Height is fixed (minH = maxH = 1 row).
+GRID_COLS = 3
+GRID_ROW_HEIGHT = 300
+_GRID_CONSTRAINTS = {'minW': 1, 'maxW': GRID_COLS, 'minH': 1, 'maxH': 1}
+
 DEFAULT_GRID_LAYOUT = [
-    {'i': 'chart-daily-reviews',      'x': 0, 'y': 0,  'w': 8,  'h': 4},
-    {'i': 'chart-hourly',             'x': 8, 'y': 0,  'w': 4,  'h': 4},
-    {'i': 'chart-recall-rate',        'x': 0, 'y': 4,  'w': 8,  'h': 4},
-    {'i': 'chart-review-speed',       'x': 8, 'y': 4,  'w': 4,  'h': 4},
-    {'i': 'chart-known-words',        'x': 0, 'y': 8,  'w': 12, 'h': 4},
-    {'i': 'chart-future-load',        'x': 0, 'y': 12, 'w': 8,  'h': 4},
-    {'i': 'chart-calibration',        'x': 8, 'y': 12, 'w': 4,  'h': 4},
-    {'i': 'chart-retrievability-dist', 'x': 0, 'y': 16, 'w': 4, 'h': 4},
-    {'i': 'chart-stability-dist',     'x': 4, 'y': 16, 'w': 4,  'h': 4},
-    {'i': 'chart-difficulty-dist',    'x': 8, 'y': 16, 'w': 4,  'h': 4},
-    {'i': 'chart-completion',         'x': 0, 'y': 20, 'w': 8,  'h': 4},
-    {'i': 'chart-retention-workload', 'x': 8, 'y': 20, 'w': 4,  'h': 4},
-    {'i': 'chart-cohorts',            'x': 0, 'y': 24, 'w': 8,  'h': 4},
-    {'i': 'chart-fatigue',            'x': 8, 'y': 24, 'w': 4,  'h': 4},
+    {'i': 'chart-daily-reviews',       'x': 0, 'y': 0, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-hourly',              'x': 2, 'y': 0, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-recall-rate',         'x': 0, 'y': 1, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-review-speed',        'x': 2, 'y': 1, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-known-words',         'x': 0, 'y': 2, 'w': 3, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-future-load',         'x': 0, 'y': 3, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-calibration',         'x': 2, 'y': 3, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-retrievability-dist', 'x': 0, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-stability-dist',      'x': 1, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-difficulty-dist',     'x': 2, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-completion',          'x': 0, 'y': 5, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-retention-workload',  'x': 2, 'y': 5, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-cohorts',             'x': 0, 'y': 6, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'chart-fatigue',             'x': 2, 'y': 6, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
 ]
+
+
+def sanitize_grid_item(stored: dict, default: dict) -> dict:
+    """Clamp a stored grid item onto the discrete 3-column grid."""
+    try:
+        w = min(max(int(stored.get('w', default['w'])), 1), GRID_COLS)
+        x = min(max(int(stored.get('x', default['x'])), 0), GRID_COLS - w)
+        y = max(int(stored.get('y', default['y'])), 0)
+    except (TypeError, ValueError):
+        return dict(default)
+    return {'i': default['i'], 'x': x, 'y': y, 'w': w, 'h': 1, **_GRID_CONSTRAINTS}
 
 
 def _grid_chart(chart_id):
@@ -70,6 +86,7 @@ def create_main_layout():
         dcc.Store(id='backup-refresh-token', data=0, storage_type='memory'),
         dcc.Store(id='xaxis-mode', data='dates', storage_type='local'),
         dcc.Store(id='grid-layout-store', storage_type='local'),
+        dcc.Store(id='grid-resize-sync', storage_type='memory'),
         dcc.Store(id='ui-store', storage_type='local', data={
             'session_time_range': 'all',
             'xaxis_mode': 'dates',
@@ -228,8 +245,8 @@ def create_main_layout():
                 id='chart-grid',
                 items=[_grid_chart(item['i']) for item in DEFAULT_GRID_LAYOUT],
                 itemLayout=DEFAULT_GRID_LAYOUT,
-                rowHeight=62,
-                cols={'lg': 12, 'md': 12, 'sm': 6, 'xs': 4, 'xxs': 2},
+                rowHeight=GRID_ROW_HEIGHT,
+                cols={'lg': GRID_COLS, 'md': GRID_COLS, 'sm': 1, 'xs': 1, 'xxs': 1},
                 compactType='vertical',
                 showRemoveButton=False,
                 showResizeHandles=True,

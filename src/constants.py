@@ -191,6 +191,32 @@ INDEX_STRING = '''
                 grid-column: 1 / -1;
             }
 
+            /* Draggable grid items */
+            .react-grid-item {
+                overflow: hidden;
+                border-radius: 4px;
+            }
+            .react-grid-dragHandle {
+                padding: 0 !important;
+                height: 14px;
+                line-height: 14px;
+                font-size: 9px;
+                letter-spacing: 3px;
+                user-select: none;
+                opacity: 0.55;
+                border-radius: 4px 4px 0 0;
+                transition: opacity 0.15s, background 0.15s;
+            }
+            .react-grid-dragHandle:hover {
+                opacity: 1;
+                background: #2a2d3a !important;
+            }
+            .react-grid-placeholder {
+                background: #5b8dff !important;
+                opacity: 0.12 !important;
+                border-radius: 4px;
+            }
+
             /* Toast message */
             .toast-msg {
                 position: fixed;

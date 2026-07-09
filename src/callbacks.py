@@ -6,12 +6,12 @@ All @callback decorators register against the global Dash app instance.
 import base64
 import os
 import time
-from dash import dcc, html, Input, Output, State, callback, ctx, no_update
+from dash import dcc, html, Input, Output, State, callback, clientside_callback, ctx, no_update
 
 from .constants import COLORS
 from .upload_handler import process_apkg_upload
 from .anki_sync import sync_from_anki, get_sync_info
-from .layout import create_stat_item, DEFAULT_GRID_LAYOUT
+from .layout import create_stat_item, DEFAULT_GRID_LAYOUT, sanitize_grid_item
 from .charts_session import (
     create_daily_reviews_chart,
     create_hourly_chart,
@@ -187,12 +187,35 @@ def save_grid_layout(current_layout):
     prevent_initial_call=False,
 )
 def restore_grid_layout(_, stored):
-    """Restore the saved grid layout on page load, falling back to defaults
-    for any chart not present in the stored layout (e.g. newly added)."""
+    """Restore the saved grid layout on page load. Stored items are clamped
+    onto the discrete 3-column grid (also migrates stale layouts saved under
+    older grid geometries); charts missing from the store get defaults."""
     if not stored:
         return DEFAULT_GRID_LAYOUT
+    # Layouts saved under a different grid geometry (e.g. the old 12-column
+    # grid) can't be meaningfully clamped — reset to defaults instead.
+    if any(isinstance(i, dict) and (i.get('w') or 0) > 3 for i in stored):
+        return DEFAULT_GRID_LAYOUT
     by_id = {item.get('i'): item for item in stored if isinstance(item, dict)}
-    return [by_id.get(d['i'], d) for d in DEFAULT_GRID_LAYOUT]
+    return [
+        sanitize_grid_item(by_id[d['i']], d) if d['i'] in by_id else dict(d)
+        for d in DEFAULT_GRID_LAYOUT
+    ]
+
+
+# Plotly only re-renders on window resize; the grid resizes containers
+# without one, so dispatch a synthetic resize after every layout change.
+clientside_callback(
+    """
+    function(_layout) {
+        setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 150);
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('grid-resize-sync', 'data'),
+    Input('chart-grid', 'currentLayout'),
+    prevent_initial_call=False,
+)
 
 
 # ---------------------------------------------------------------------------
