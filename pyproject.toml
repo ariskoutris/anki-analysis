@@ -3,13 +3,13 @@ name = "anki-analysis"
 version = "0.1.0"
 description = "Interactive Plotly Dash dashboard for analysing Anki flashcard reviews on FSRS-enabled decks."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "numpy>=2.0.0",
+    "numpy>=2.5.1",
     "zstandard>=0.25.0",
-    "pandas>=3.0.0",
-    "dash>=4.0.0",
-    "plotly>=6.5.0",
+    "pandas>=3.0.3",
+    "dash>=4.4.0",
+    "plotly>=6.9.0",
     "fsrs>=6.3.1",
 ]
 
