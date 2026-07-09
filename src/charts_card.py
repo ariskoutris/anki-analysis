@@ -198,6 +198,18 @@ def create_completion_chart(data, default_pace=10, max_pace=30, horizon_days=3 *
     return fig
 
 
+def _add_median_line(fig, series, label_fmt):
+    """Dashed median reference line with label, matching newer charts."""
+    med = float(series.median())
+    fig.add_vline(
+        x=med,
+        line=dict(color='#e0e0e0', width=1, dash='dash'),
+        annotation_text=f'median {label_fmt.format(med)}',
+        annotation_position='top right',
+        annotation_font=dict(color='#8b8fa3', size=10),
+    )
+
+
 # Fixed cohort-year -> color mapping so filters never repaint a cohort
 _COHORT_PALETTE = [COLORS['primary'], COLORS['secondary'], COLORS['success'],
                    COLORS['warning'], COLORS['info'], COLORS['danger']]
@@ -363,6 +375,8 @@ def create_retrievability_distribution_chart(df):
         hovertemplate='Retrievability: %{x:.0f}%<br>Cards: %{y}<extra></extra>'
     ))
 
+    _add_median_line(fig, df['retrievability'], '{:.0f}%')
+
     fig.update_layout(
         title='Retrievability Distribution',
         xaxis_title='Retrievability (%)',
@@ -390,6 +404,8 @@ def create_stability_distribution_chart(df):
         hovertemplate='Stability: %{x:.1f} days<br>Cards: %{y}<extra></extra>'
     ))
 
+    _add_median_line(fig, df['stability'], '{:.0f}d')
+
     fig.update_layout(
         title='Stability Distribution',
         xaxis_title='Stability (days)',
@@ -416,6 +432,8 @@ def create_difficulty_distribution_chart(df):
         opacity=0.7,
         hovertemplate='Difficulty: %{x:.1f}<br>Cards: %{y}<extra></extra>'
     ))
+
+    _add_median_line(fig, df['difficulty'], '{:.1f}')
 
     fig.update_layout(
         title='Difficulty Distribution',

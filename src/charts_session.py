@@ -64,22 +64,25 @@ def add_session_time_markers(fig, markers, y_position='bottom'):
 
 
 def _add_trend_with_ci(fig, x_values, y_vals, color, custom_data, hover_label,
-                       y_min=None, y_max=None):
-    """Add polynomial regression trend line with symmetric rolling SE band."""
+                       y_min=None, y_max=None, window=15):
+    """
+    Add a centered rolling-mean trend with a 95% CI band (rolling SEM).
+    Local estimate — unlike a global polynomial fit, it cannot invent
+    structure across long gaps in the data.
+    """
     n = len(y_vals)
-    x_num = np.arange(n, dtype=float)
-    y = np.asarray(y_vals, dtype=float)
+    if n < 5:
+        return None  # too few points for a meaningful trend; autorange y
 
-    degree = min(3, max(1, n // 20))
-    coeffs = np.polyfit(x_num, y, degree)
-    y_fit = np.polyval(coeffs, x_num)
+    y = pd.Series(np.asarray(y_vals, dtype=float))
 
-    residuals = y - y_fit
-    window = min(15, n)
-    se = np.sqrt(np.convolve(residuals**2, np.ones(window) / window, mode='same'))
+    w = min(window, max(3, n))
+    roll = y.rolling(w, center=True, min_periods=max(2, w // 3))
+    y_fit = roll.mean().to_numpy()
+    sem = (roll.std() / np.sqrt(roll.count())).fillna(0).to_numpy()
 
-    y_upper = y_fit + 1.96 * se
-    y_lower = y_fit - 1.96 * se
+    y_upper = y_fit + 1.96 * sem
+    y_lower = y_fit - 1.96 * sem
 
     if y_max is not None:
         y_upper = np.minimum(y_upper, y_max)
@@ -109,7 +112,10 @@ def _add_trend_with_ci(fig, x_values, y_vals, color, custom_data, hover_label,
         customdata=custom_data, hovertemplate=hover_fit
     ))
 
-    y_range = [min(y_lower.min(), y_fit.min()) / 1.03, max(y_upper.max(), y_fit.max()) * 1.03]
+    y_range = [np.nanmin([np.nanmin(y_lower), np.nanmin(y_fit)]) / 1.03,
+               np.nanmax([np.nanmax(y_upper), np.nanmax(y_fit)]) * 1.03]
+    if not all(np.isfinite(y_range)):
+        return None
     if y_max is not None:
         y_range[1] = min(y_range[1], y_max)
     return y_range
@@ -190,7 +196,8 @@ def create_hourly_chart(df):
         orientation='h',
         marker=dict(
             color=df['success_rate'],
-            colorscale=[[0, COLORS['danger']], [0.5, COLORS['warning']], [1, COLORS['success']]],
+            # Single-hue sequential: success rate is a magnitude, not a status
+            colorscale=[[0, '#16302b'], [1, COLORS['success']]],
             cmin=df['success_rate'].min() - 5,
             cmax=min(df['success_rate'].max() + 5, 100),
             colorbar=dict(
@@ -342,49 +349,31 @@ def create_future_load_chart(df, days_ahead=60):
     x_start = df['date'].min()
     x_end = x_start + timedelta(days=60)
 
-    # Color scale based on the default 60-day view
-    df_view = df[df['date'] <= x_end]
-    cmax = df_view['due_count'].quantile(0.95) if len(df_view) > 0 else 50
-
     fig = go.Figure()
 
+    # Cumulative count lives in the hover, not on a second axis
     fig.add_trace(go.Bar(
         x=df['date'],
         y=df['due_count'],
-        name='Due Cards',
-        marker=dict(
-            color=df['due_count'],
-            colorscale=[[0, COLORS['success']], [0.5, COLORS['warning']], [1, COLORS['danger']]],
-            cmin=0,
-            cmax=cmax,
-            showscale=False
-        ),
-        hovertemplate='%{x|%b %d}<br>Due: %{y} cards<extra></extra>'
+        name='Due',
+        marker=dict(color=COLORS['primary'], opacity=0.7),
+        customdata=df['due_count'].cumsum(),
+        hovertemplate='Due: %{y} cards (cumulative: %{customdata:,})<extra></extra>',
     ))
 
     fig.add_trace(go.Scatter(
         x=df['date'],
-        y=df['due_count'].cumsum(),
+        y=df['ma7'],
         mode='lines',
-        name='Cumulative',
-        line=dict(color=COLORS['primary'], width=2),
-        yaxis='y2',
-        hovertemplate='%{x|%b %d}<br>Cumulative: %{y:,}<extra></extra>'
+        name='7-day avg',
+        line=dict(color=COLORS['warning'], width=2),
+        hovertemplate='7-day avg: %{y:.0f}<extra></extra>',
     ))
 
     fig.update_layout(
         title='Upcoming Reviews',
         xaxis_title='Date',
         yaxis_title='Cards Due',
-        yaxis2=dict(
-            title='Cumulative',
-            overlaying='y',
-            side='right',
-            showgrid=False,
-            zeroline=False,
-            tickfont=dict(color='#5a5e72', size=10),
-            title_font=dict(color='#8b8fa3', size=11),
-        ),
         hovermode='x unified',
         **DARK_CHART_LAYOUT,
     )
