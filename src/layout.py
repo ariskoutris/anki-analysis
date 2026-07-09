@@ -3,6 +3,7 @@ Layout builders for the Anki Learning Dashboard.
 Single-page dark Grafana-style grid layout.
 """
 
+import dash_dynamic_grid_layout as dgl
 from dash import dcc, html
 
 from .constants import COLORS
@@ -11,6 +12,45 @@ from .data_loader import get_deck_list
 
 CHART_HEIGHT = '280px'
 DARK_BG = {'backgroundColor': '#111217'}
+
+# Default grid layout: 12 columns, h units of rowHeight=62px (h=4 ≈ 280px incl. margins)
+DEFAULT_GRID_LAYOUT = [
+    {'i': 'chart-daily-reviews',      'x': 0, 'y': 0,  'w': 8,  'h': 4},
+    {'i': 'chart-hourly',             'x': 8, 'y': 0,  'w': 4,  'h': 4},
+    {'i': 'chart-recall-rate',        'x': 0, 'y': 4,  'w': 8,  'h': 4},
+    {'i': 'chart-review-speed',       'x': 8, 'y': 4,  'w': 4,  'h': 4},
+    {'i': 'chart-known-words',        'x': 0, 'y': 8,  'w': 12, 'h': 4},
+    {'i': 'chart-future-load',        'x': 0, 'y': 12, 'w': 8,  'h': 4},
+    {'i': 'chart-calibration',        'x': 8, 'y': 12, 'w': 4,  'h': 4},
+    {'i': 'chart-retrievability-dist', 'x': 0, 'y': 16, 'w': 4, 'h': 4},
+    {'i': 'chart-stability-dist',     'x': 4, 'y': 16, 'w': 4,  'h': 4},
+    {'i': 'chart-difficulty-dist',    'x': 8, 'y': 16, 'w': 4,  'h': 4},
+    {'i': 'chart-completion',         'x': 0, 'y': 20, 'w': 8,  'h': 4},
+    {'i': 'chart-retention-workload', 'x': 8, 'y': 20, 'w': 4,  'h': 4},
+    {'i': 'chart-cohorts',            'x': 0, 'y': 24, 'w': 8,  'h': 4},
+    {'i': 'chart-fatigue',            'x': 8, 'y': 24, 'w': 4,  'h': 4},
+]
+
+
+def _grid_chart(chart_id):
+    """A draggable/resizable grid item wrapping one chart."""
+    return dgl.DraggableWrapper(
+        children=[
+            html.Div(
+                dcc.Graph(
+                    id=chart_id,
+                    config={'displayModeBar': False},
+                    responsive=True,
+                    style={'height': '100%', **DARK_BG},
+                ),
+                className='chart-panel',
+                style={'height': '100%'},
+            ),
+        ],
+        handleText='⠿',
+        handleBackground='#181b23',
+        handleColor='#5a5e72',
+    )
 
 def create_stat_item(value, label, color=COLORS['text_primary'], secondary=False):
     """Create a compact stat indicator for the stat strip."""
@@ -29,6 +69,7 @@ def create_main_layout():
         dcc.Location(id='url', refresh=True),
         dcc.Store(id='backup-refresh-token', data=0, storage_type='memory'),
         dcc.Store(id='xaxis-mode', data='dates', storage_type='local'),
+        dcc.Store(id='grid-layout-store', storage_type='local'),
         dcc.Store(id='ui-store', storage_type='local', data={
             'session_time_range': 'all',
             'xaxis_mode': 'dates',
@@ -182,92 +223,18 @@ def create_main_layout():
                 html.Div(id='stat-avg-retrievability'),
             ], className='stat-strip'),
 
-            # ── Chart Grid ──
-            html.Div([
-                # Row 1
-                html.Div(
-                    dcc.Graph(id='chart-daily-reviews', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel chart-panel--wide',
-                ),
-                html.Div(
-                    dcc.Graph(id='chart-hourly', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel',
-                ),
-
-                # Row 2
-                html.Div(
-                    dcc.Graph(id='chart-recall-rate', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel chart-panel--wide',
-                ),
-                html.Div(
-                    dcc.Graph(id='chart-review-speed', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel',
-                ),
-
-                # Row 3 — hero: expected known cards over time
-                html.Div(
-                    dcc.Graph(id='chart-known-words', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel chart-panel--full',
-                ),
-
-                # Row 4
-                html.Div(
-                    dcc.Graph(id='chart-future-load', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel chart-panel--wide',
-                ),
-                html.Div(
-                    dcc.Graph(id='chart-calibration', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel',
-                ),
-
-                # Row 5
-                html.Div(
-                    dcc.Graph(id='chart-retrievability-dist', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel',
-                ),
-                html.Div(
-                    dcc.Graph(id='chart-stability-dist', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel',
-                ),
-                html.Div(
-                    dcc.Graph(id='chart-difficulty-dist', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel',
-                ),
-
-                # Row 6 — planning
-                html.Div(
-                    dcc.Graph(id='chart-completion', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel chart-panel--wide',
-                ),
-                html.Div(
-                    dcc.Graph(id='chart-retention-workload', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel',
-                ),
-
-                # Row 7 — learning dynamics
-                html.Div(
-                    dcc.Graph(id='chart-cohorts', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel chart-panel--wide',
-                ),
-                html.Div(
-                    dcc.Graph(id='chart-fatigue', config={'displayModeBar': False},
-                              style={'height': CHART_HEIGHT, **DARK_BG}),
-                    className='chart-panel',
-                ),
-            ], className='chart-grid'),
+            # ── Chart Grid (draggable / resizable) ──
+            dgl.DashGridLayout(
+                id='chart-grid',
+                items=[_grid_chart(item['i']) for item in DEFAULT_GRID_LAYOUT],
+                itemLayout=DEFAULT_GRID_LAYOUT,
+                rowHeight=62,
+                cols={'lg': 12, 'md': 12, 'sm': 6, 'xs': 4, 'xxs': 2},
+                compactType='vertical',
+                showRemoveButton=False,
+                showResizeHandles=True,
+                style={'minHeight': '400px'},
+            ),
 
         ], className='dashboard'),
     ])

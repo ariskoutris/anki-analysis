@@ -11,7 +11,7 @@ from dash import dcc, html, Input, Output, State, callback, ctx, no_update
 from .constants import COLORS
 from .upload_handler import process_apkg_upload
 from .anki_sync import sync_from_anki, get_sync_info
-from .layout import create_stat_item
+from .layout import create_stat_item, DEFAULT_GRID_LAYOUT
 from .charts_session import (
     create_daily_reviews_chart,
     create_hourly_chart,
@@ -162,6 +162,37 @@ def update_overview_container(_refresh_token, _url, deck_value):
         secondary=True)
 
     return upcoming, streak, recall, overdue, total_reviews, total_hours, days_active, cards_learned, avg_ret
+
+
+# ---------------------------------------------------------------------------
+# Callbacks: Persist / restore the draggable chart grid layout
+# ---------------------------------------------------------------------------
+
+@callback(
+    Output('grid-layout-store', 'data'),
+    Input('chart-grid', 'currentLayout'),
+    prevent_initial_call=True,
+)
+def save_grid_layout(current_layout):
+    """Persist grid positions/sizes to localStorage after drag or resize."""
+    if not current_layout:
+        return no_update
+    return current_layout
+
+
+@callback(
+    Output('chart-grid', 'itemLayout'),
+    Input('url', 'pathname'),
+    State('grid-layout-store', 'data'),
+    prevent_initial_call=False,
+)
+def restore_grid_layout(_, stored):
+    """Restore the saved grid layout on page load, falling back to defaults
+    for any chart not present in the stored layout (e.g. newly added)."""
+    if not stored:
+        return DEFAULT_GRID_LAYOUT
+    by_id = {item.get('i'): item for item in stored if isinstance(item, dict)}
+    return [by_id.get(d['i'], d) for d in DEFAULT_GRID_LAYOUT]
 
 
 # ---------------------------------------------------------------------------
