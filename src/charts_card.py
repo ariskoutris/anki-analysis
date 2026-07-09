@@ -394,26 +394,12 @@ def _histogram_bar_figure(values, edges, colors, title, x_title, hover_fmt):
 
 
 def create_retrievability_distribution_chart(df):
-    """Retrievability histogram, bars colored by memory zone."""
+    """Retrievability histogram."""
     if df.empty:
         return go.Figure()
 
-    edges = np.arange(0, 100.01, 4.0)
-    centers = (edges[:-1] + edges[1:]) / 2
-
-    def zone_color(r):
-        if r < 50:
-            return COLORS['critical']
-        if r < 70:
-            return COLORS['at_risk']
-        if r < 85:
-            return COLORS['moderate']
-        if r < 95:
-            return COLORS['good']
-        return COLORS['excellent']
-
     fig = _histogram_bar_figure(
-        df['retrievability'], edges, [zone_color(c) for c in centers],
+        df['retrievability'], np.arange(0, 100.01, 4.0), COLORS['primary'],
         'Retrievability Distribution', 'Retrievability (%)',
         '%{customdata[0]:.0f}–%{customdata[1]:.0f}%: %{y} cards')
     _add_median_line(fig, df['retrievability'], '{:.0f}%')
