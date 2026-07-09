@@ -361,79 +361,106 @@ def create_calibration_chart(df, summary=None):
     return fig
 
 
-def _create_ecdf_figure(series, title, color, x_title, hover_unit,
-                        median_fmt, log_x=False):
+def _histogram_bar_figure(values, edges, colors, title, x_title, hover_fmt):
     """
-    ECDF: share of cards at or below each value. No binning artifacts,
-    quantiles readable directly off the curve.
+    Precomputed histogram rendered as slim rounded bars with gaps.
+    `colors` is a single color or a per-bin list.
     """
-    values = np.sort(series.to_numpy(dtype=float))
-    pct = np.arange(1, len(values) + 1) / len(values) * 100
-
-    r, g, b = int(color[1:3], 16), int(color[3:5], 16), int(color[5:7], 16)
+    counts, _ = np.histogram(values, bins=edges)
+    centers = (edges[:-1] + edges[1:]) / 2
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=values,
-        y=pct,
-        mode='lines',
-        line=dict(color=color, width=2),
-        fill='tozeroy',
-        fillcolor=f'rgba({r},{g},{b},0.10)',
-        hovertemplate='≤ %{x:.1f}' + hover_unit + ': %{y:.0f}% of cards<extra></extra>',
+    fig.add_trace(go.Bar(
+        x=centers,
+        y=counts,
+        width=(edges[1:] - edges[:-1]) * 0.82,
+        marker=dict(color=colors, cornerradius=3),
+        customdata=np.column_stack([edges[:-1], edges[1:]]),
+        hovertemplate=hover_fmt + '<extra></extra>',
         showlegend=False,
     ))
-
-    # Median reference (on log axes, shape coords are log10 of the value)
-    med = float(np.median(values))
-    fig.add_vline(
-        x=np.log10(med) if log_x else med,
-        line=dict(color='#e0e0e0', width=1, dash='dash'),
-        annotation_text=f'median {median_fmt.format(med)}',
-        annotation_position='top left' if log_x else 'top right',
-        annotation_font=dict(color='#8b8fa3', size=10),
-    )
 
     fig.update_layout(
         title=title,
         xaxis_title=x_title,
-        yaxis_title='% of cards',
+        yaxis_title='Cards',
+        bargap=0,
         **DARK_CHART_LAYOUT,
     )
-    if log_x:
-        tickvals = [t for t in (1, 3, 7, 21, 60, 180, 365, 1000)
-                    if values[0] <= t <= values[-1] * 1.1]
-        fig.update_xaxes(type='log', tickvals=tickvals,
-                         ticktext=[f'{t}d' for t in tickvals], **DARK_CHART_AXIS)
-    else:
-        fig.update_xaxes(rangemode='tozero', **DARK_CHART_AXIS)
-    fig.update_yaxes(range=[0, 100], **DARK_CHART_AXIS)
+    fig.update_xaxes(**DARK_CHART_AXIS)
+    fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
 
     return fig
 
 
 def create_retrievability_distribution_chart(df):
-    """Retrievability ECDF"""
+    """Retrievability histogram, bars colored by memory zone."""
     if df.empty:
         return go.Figure()
-    return _create_ecdf_figure(
-        df['retrievability'], 'Retrievability Distribution', COLORS['primary'],
-        'Retrievability (%)', '%', '{:.0f}%')
+
+    edges = np.arange(0, 100.01, 4.0)
+    centers = (edges[:-1] + edges[1:]) / 2
+
+    def zone_color(r):
+        if r < 50:
+            return COLORS['critical']
+        if r < 70:
+            return COLORS['at_risk']
+        if r < 85:
+            return COLORS['moderate']
+        if r < 95:
+            return COLORS['good']
+        return COLORS['excellent']
+
+    fig = _histogram_bar_figure(
+        df['retrievability'], edges, [zone_color(c) for c in centers],
+        'Retrievability Distribution', 'Retrievability (%)',
+        '%{customdata[0]:.0f}–%{customdata[1]:.0f}%: %{y} cards')
+    _add_median_line(fig, df['retrievability'], '{:.0f}%')
+    return fig
 
 
 def create_stability_distribution_chart(df):
-    """Stability ECDF (log x — stability is heavily right-skewed)"""
+    """Stability histogram, log-binned (stability is heavily right-skewed)."""
     if df.empty:
         return go.Figure()
-    return _create_ecdf_figure(
-        df[df['stability'] > 0]['stability'], 'Stability Distribution',
-        COLORS['success'], 'Stability (days, log)', 'd', '{:.0f}d', log_x=True)
+
+    values = df[df['stability'] > 0]['stability']
+    log_vals = np.log10(values.to_numpy(dtype=float))
+    edges = np.linspace(log_vals.min(), log_vals.max(), 25)
+
+    fig = _histogram_bar_figure(
+        log_vals, edges, COLORS['success'],
+        'Stability Distribution', 'Stability (days, log)',
+        '%{customdata[2]:.0f}–%{customdata[3]:.0f}d: %{y} cards')
+    # Hover needs day-denominated bin bounds alongside the log-space ones
+    fig.data[0].customdata = np.column_stack([
+        edges[:-1], edges[1:], 10 ** edges[:-1], 10 ** edges[1:]])
+
+    tickvals = [t for t in (1, 3, 7, 21, 60, 180, 365, 1000)
+                if log_vals.min() <= np.log10(t) <= log_vals.max() + 0.05]
+    fig.update_xaxes(tickvals=[np.log10(t) for t in tickvals],
+                     ticktext=[f'{t}d' for t in tickvals])
+
+    med = float(values.median())
+    fig.add_vline(
+        x=np.log10(med),
+        line=dict(color='#e0e0e0', width=1, dash='dash'),
+        annotation_text=f'median {med:.0f}d',
+        annotation_position='top left',
+        annotation_font=dict(color='#8b8fa3', size=10),
+    )
+    return fig
 
 
 def create_difficulty_distribution_chart(df):
-    """Difficulty ECDF"""
+    """Difficulty histogram."""
     if df.empty:
         return go.Figure()
-    return _create_ecdf_figure(
-        df['difficulty'], 'Difficulty Distribution', COLORS['info'],
-        'Difficulty (0-10)', '', '{:.1f}')
+
+    fig = _histogram_bar_figure(
+        df['difficulty'], np.linspace(0, 10, 26), COLORS['info'],
+        'Difficulty Distribution', 'Difficulty (0-10)',
+        '%{customdata[0]:.1f}–%{customdata[1]:.1f}: %{y} cards')
+    _add_median_line(fig, df['difficulty'], '{:.1f}')
+    return fig
