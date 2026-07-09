@@ -19,21 +19,24 @@ GRID_COLS = 3
 GRID_ROW_HEIGHT = 300
 _GRID_CONSTRAINTS = {'minW': 1, 'maxW': GRID_COLS, 'minH': 1, 'maxH': 1}
 
+# NOTE: layout ids must match the DraggableWrapper ids ('w-' + chart id) —
+# the component matches itemLayout entries against child keys, which Dash
+# derives from the wrapper's id. The dcc.Graph inside keeps the bare chart id.
 DEFAULT_GRID_LAYOUT = [
-    {'i': 'chart-daily-reviews',       'x': 0, 'y': 0, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-hourly',              'x': 2, 'y': 0, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-recall-rate',         'x': 0, 'y': 1, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-review-speed',        'x': 2, 'y': 1, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-known-words',         'x': 0, 'y': 2, 'w': 3, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-future-load',         'x': 0, 'y': 3, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-calibration',         'x': 2, 'y': 3, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-retrievability-dist', 'x': 0, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-stability-dist',      'x': 1, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-difficulty-dist',     'x': 2, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-completion',          'x': 0, 'y': 5, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-retention-workload',  'x': 2, 'y': 5, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-cohorts',             'x': 0, 'y': 6, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'chart-fatigue',             'x': 2, 'y': 6, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-daily-reviews',       'x': 0, 'y': 0, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-hourly',              'x': 2, 'y': 0, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-recall-rate',         'x': 0, 'y': 1, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-review-speed',        'x': 2, 'y': 1, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-known-words',         'x': 0, 'y': 2, 'w': 3, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-future-load',         'x': 0, 'y': 3, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-calibration',         'x': 2, 'y': 3, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-retrievability-dist', 'x': 0, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-stability-dist',      'x': 1, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-difficulty-dist',     'x': 2, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-completion',          'x': 0, 'y': 5, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-retention-workload',  'x': 2, 'y': 5, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-cohorts',             'x': 0, 'y': 6, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-fatigue',             'x': 2, 'y': 6, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
 ]
 
 
@@ -48,9 +51,11 @@ def sanitize_grid_item(stored: dict, default: dict) -> dict:
     return {'i': default['i'], 'x': x, 'y': y, 'w': w, 'h': 1, **_GRID_CONSTRAINTS}
 
 
-def _grid_chart(chart_id):
+def _grid_chart(wrapper_id):
     """A draggable/resizable grid item wrapping one chart."""
+    chart_id = wrapper_id.removeprefix('w-')
     return dgl.DraggableWrapper(
+        id=wrapper_id,
         children=[
             html.Div(
                 dcc.Graph(

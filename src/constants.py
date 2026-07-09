@@ -217,6 +217,36 @@ INDEX_STRING = '''
                 border-radius: 4px;
             }
 
+            /* Resize handles: subtle strips on every border */
+            .react-grid-item > .react-resizable-handle {
+                background-image: none;
+                z-index: 5;
+            }
+            .react-grid-item > .react-resizable-handle::after {
+                border: none !important;
+            }
+            .react-resizable-handle-e,
+            .react-resizable-handle-w {
+                top: 0 !important;
+                height: 100% !important;
+                width: 8px;
+                margin-top: 0 !important;
+                transform: none !important;
+            }
+            .react-resizable-handle-e:hover,
+            .react-resizable-handle-w:hover,
+            .react-resizable-handle-se:hover,
+            .react-resizable-handle-sw:hover,
+            .react-resizable-handle-ne:hover,
+            .react-resizable-handle-nw:hover {
+                background: rgba(91, 141, 255, 0.18);
+            }
+            /* Height is fixed — vertical-only handles are dead, hide them */
+            .react-resizable-handle-n,
+            .react-resizable-handle-s {
+                display: none;
+            }
+
             /* Toast message */
             .toast-msg {
                 position: fixed;
