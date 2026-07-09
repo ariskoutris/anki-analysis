@@ -11,7 +11,12 @@ from dash import dcc, html, Input, Output, State, callback, clientside_callback,
 from .constants import COLORS
 from .upload_handler import process_apkg_upload
 from .anki_sync import sync_from_anki, get_sync_info
-from .layout import create_stat_item, DEFAULT_GRID_LAYOUT, sanitize_grid_item
+from .layout import (
+    create_stat_item,
+    DEFAULT_GRID_LAYOUT,
+    sanitize_grid_item,
+    normalize_grid_resize,
+)
 from .charts_session import (
     create_daily_reviews_chart,
     create_hourly_chart,
@@ -170,14 +175,20 @@ def update_overview_container(_refresh_token, _url, deck_value):
 
 @callback(
     Output('grid-layout-store', 'data'),
+    Output('chart-grid', 'itemLayout', allow_duplicate=True),
     Input('chart-grid', 'currentLayout'),
+    State('grid-layout-store', 'data'),
     prevent_initial_call=True,
 )
-def save_grid_layout(current_layout):
-    """Persist grid positions/sizes to localStorage after drag or resize."""
+def save_grid_layout(current_layout, prev_layout):
+    """Persist grid changes. Width changes are normalized so neighbours
+    shrink in place instead of being pushed to the next row."""
     if not current_layout:
-        return no_update
-    return current_layout
+        return no_update, no_update
+    normalized = normalize_grid_resize(current_layout, prev_layout)
+    if normalized is None:
+        return current_layout, no_update
+    return normalized, normalized
 
 
 @callback(

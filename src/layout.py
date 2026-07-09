@@ -40,6 +40,73 @@ DEFAULT_GRID_LAYOUT = [
 ]
 
 
+def normalize_grid_resize(current: list, prev: list) -> list | None:
+    """
+    Keep resizes within their row: when an item's width changes, restore
+    every item's row membership from the previous layout and shrink the
+    resized item's row-neighbours so the row still sums to exactly
+    GRID_COLS units. Growing beyond what neighbours can absorb (each has
+    minW=1) is clamped, so a resize can never push panels to another row.
+
+    Returns the corrected layout, or None when no correction is needed
+    (not a resize, or layouts don't line up).
+    """
+    if not prev or not current:
+        return None
+    prev_by = {i['i']: i for i in prev if isinstance(i, dict) and 'i' in i}
+    cur_by = {i['i']: i for i in current if isinstance(i, dict) and 'i' in i}
+    if set(prev_by) != set(cur_by):
+        return None
+
+    resized = [k for k in cur_by if int(cur_by[k].get('w', 0)) != int(prev_by[k].get('w', 0))]
+    if not resized:
+        return None
+    target = resized[0]
+
+    # Rows from the *previous* layout: membership never changes on resize
+    rows: dict[int, list[str]] = {}
+    for k, item in prev_by.items():
+        rows.setdefault(int(item['y']), []).append(k)
+
+    out = {}
+    for y, members in rows.items():
+        members.sort(key=lambda k: int(prev_by[k]['x']))
+        if target not in members:
+            for k in members:
+                out[k] = dict(prev_by[k])
+            continue
+
+        others = [k for k in members if k != target]
+        w_target = max(1, min(int(cur_by[target]['w']), GRID_COLS - len(others)))
+        remaining = GRID_COLS - w_target
+
+        widths = {target: w_target}
+        if others:
+            prev_total = sum(int(prev_by[k]['w']) for k in others)
+            if prev_total <= remaining:
+                # Neighbours keep their widths; last one absorbs any slack
+                for k in others:
+                    widths[k] = int(prev_by[k]['w'])
+                widths[others[-1]] += remaining - prev_total
+            else:
+                # Shrink neighbours toward minW=1, widest-first gets leftover
+                widths.update({k: 1 for k in others})
+                slack = remaining - len(others)
+                order = sorted(others, key=lambda k: -int(prev_by[k]['w']))
+                idx = 0
+                while slack > 0:
+                    widths[order[idx % len(order)]] += 1
+                    slack -= 1
+                    idx += 1
+
+        x = 0
+        for k in members:
+            out[k] = {**prev_by[k], 'x': x, 'y': y, 'w': widths[k], 'h': 1}
+            x += widths[k]
+
+    return [out[d['i']] for d in DEFAULT_GRID_LAYOUT if d['i'] in out]
+
+
 def sanitize_grid_item(stored: dict, default: dict) -> dict:
     """Clamp a stored grid item onto the discrete 3-column grid."""
     try:
