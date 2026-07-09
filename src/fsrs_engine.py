@@ -1,0 +1,668 @@
+"""
+FSRS history replay engine.
+
+Reconstructs per-review FSRS memory states (stability, difficulty, predicted
+retrievability) by replaying the full review log through py-fsrs using each
+deck's own FSRS parameters from deck presets.
+
+Shared infrastructure for the known-words metric, model calibration, and
+cohort analyses. Results are cached per (db mtime, deck_id) since replaying
+the log is the most expensive computation in the app.
+"""
+
+import os
+import struct
+from datetime import datetime, timezone
+
+import numpy as np
+import pandas as pd
+from fsrs import Scheduler, Card, Rating
+
+from .config import get_db_path
+from .data_loader import connect_db
+
+
+# =============================================================================
+# DECK CONFIG PARSING (protobuf)
+# =============================================================================
+
+def _read_varint(blob: bytes, i: int) -> tuple[int, int]:
+    """Read a protobuf varint starting at index i. Returns (value, next_index)."""
+    value = 0
+    shift = 0
+    while True:
+        b = blob[i]
+        i += 1
+        value |= (b & 0x7F) << shift
+        shift += 7
+        if not b & 0x80:
+            return value, i
+
+
+def _iter_pb_fields(blob: bytes):
+    """Yield (field_number, wire_type, raw_value) for a protobuf message."""
+    i = 0
+    n = len(blob)
+    while i < n:
+        tag, i = _read_varint(blob, i)
+        field, wire = tag >> 3, tag & 7
+        if wire == 0:
+            value, i = _read_varint(blob, i)
+        elif wire == 1:
+            value = blob[i:i + 8]
+            i += 8
+        elif wire == 2:
+            length, i = _read_varint(blob, i)
+            value = blob[i:i + length]
+            i += length
+        elif wire == 5:
+            value = blob[i:i + 4]
+            i += 4
+        else:
+            return  # unknown wire type; bail out
+        yield field, wire, value
+
+
+def _to_fsrs6_params(params: list[float]) -> tuple[float, ...] | None:
+    """Migrate FSRS-4.5 (17) / FSRS-5 (19) parameter lists to FSRS-6 (21)."""
+    params = list(params)
+    if len(params) == 17:
+        params += [0.0, 0.0]  # FSRS-4.5 -> FSRS-5: w17, w18
+    if len(params) == 19:
+        params += [0.0, 0.5]  # FSRS-5 -> FSRS-6: w19 (short-term), w20 (decay)
+    if len(params) != 21:
+        return None
+    return tuple(params)
+
+
+# DeckConfig.Config protobuf fields holding FSRS params, newest scheme first
+_FSRS_PARAM_FIELDS = (6, 5, 3)  # fsrs_params_6, fsrs_params_5, fsrs_params_4
+_DESIRED_RETENTION_FIELD = 37
+
+
+def _parse_deck_config(blob: bytes) -> dict:
+    """Extract FSRS params + desired retention from a deck_config blob."""
+    param_arrays: dict[int, list[float]] = {}
+    desired_retention = 0.9
+
+    for field, wire, value in _iter_pb_fields(blob):
+        if field in _FSRS_PARAM_FIELDS and wire == 2 and len(value) % 4 == 0 and len(value) >= 68:
+            param_arrays[field] = list(struct.unpack(f'<{len(value) // 4}f', value))
+        elif field == _DESIRED_RETENTION_FIELD and wire == 5:
+            desired_retention = struct.unpack('<f', value)[0]
+
+    params = None
+    for field in _FSRS_PARAM_FIELDS:
+        if field in param_arrays:
+            params = _to_fsrs6_params(param_arrays[field])
+            if params:
+                break
+
+    return {'params': params, 'desired_retention': desired_retention}
+
+
+def _parse_deck_kind_config_id(kind_blob: bytes) -> int | None:
+    """Extract the deck_config id from a decks.kind blob (normal decks only)."""
+    for field, wire, value in _iter_pb_fields(kind_blob):
+        if field == 1 and wire == 2:  # NormalDeck submessage
+            for sub_field, sub_wire, sub_value in _iter_pb_fields(value):
+                if sub_field == 1 and sub_wire == 0:  # config_id
+                    return sub_value
+    return None
+
+
+def get_deck_fsrs_configs() -> dict[int, dict]:
+    """
+    Map deck_id -> {'params': tuple(21)|None, 'desired_retention': float}.
+
+    Decks without FSRS params (or filtered decks) get params=None, which
+    means py-fsrs default parameters are used for replay.
+    """
+    conn = connect_db()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT id, config FROM deck_config')
+    configs = {row[0]: _parse_deck_config(row[1]) for row in cursor.fetchall()}
+
+    cursor.execute('SELECT id, kind FROM decks')
+    deck_map = {}
+    default = {'params': None, 'desired_retention': 0.9}
+    for deck_id, kind_blob in cursor.fetchall():
+        config_id = _parse_deck_kind_config_id(kind_blob)
+        deck_map[deck_id] = configs.get(config_id, default)
+
+    conn.close()
+    return deck_map
+
+
+def _make_scheduler(params: tuple[float, ...] | None) -> Scheduler:
+    """Build a py-fsrs scheduler, falling back to defaults on bad params."""
+    if params:
+        try:
+            return Scheduler(parameters=params, enable_fuzzing=False)
+        except ValueError:
+            pass
+    return Scheduler(enable_fuzzing=False)
+
+
+# =============================================================================
+# REVIEW LOG REPLAY
+# =============================================================================
+
+_replay_cache: dict = {}
+
+
+def _db_token():
+    try:
+        return os.path.getmtime(get_db_path())
+    except OSError:
+        return None
+
+
+def replay_reviews(deck_id: int | None = None) -> pd.DataFrame:
+    """
+    Replay the full review history through FSRS, card by card.
+
+    Returns one row per genuine review (types 0-3, ease 1-4, card still in
+    collection) with columns:
+        cid, did, ts, rating, review_type, elapsed_days,
+        predicted_r  (retrievability just before this review; NaN on first),
+        s_before, s_after, d_after,
+        decay, factor (forgetting-curve constants of the card's preset)
+    """
+    cache_key = (_db_token(), deck_id)
+    if _replay_cache.get('key') == cache_key:
+        return _replay_cache['df']
+
+    deck_configs = get_deck_fsrs_configs()
+    schedulers = {}  # params tuple -> Scheduler
+    for cfg in deck_configs.values():
+        params = cfg['params']
+        if params not in schedulers:
+            schedulers[params] = _make_scheduler(params)
+    default_scheduler = _make_scheduler(None)
+
+    conn = connect_db()
+    deck_filter = f'AND c.did = {int(deck_id)}' if deck_id is not None else ''
+    rows = conn.execute(f"""
+        SELECT r.id, r.cid, r.ease, r.type, c.did
+        FROM revlog r
+        JOIN cards c ON r.cid = c.id
+        WHERE r.type IN (0, 1, 2, 3)
+          AND r.ease BETWEEN 1 AND 4
+          {deck_filter}
+        ORDER BY r.cid, r.id
+    """).fetchall()
+    conn.close()
+
+    cols = {name: [] for name in (
+        'cid', 'did', 'ts', 'rating', 'review_type', 'elapsed_days',
+        'predicted_r', 's_before', 's_after', 'd_after', 'decay', 'factor')}
+
+    card = None
+    current_cid = None
+    scheduler = default_scheduler
+    decay = factor = np.nan
+
+    for rid, cid, ease, rtype, did in rows:
+        if cid != current_cid:
+            current_cid = cid
+            card = Card(card_id=cid)
+            cfg = deck_configs.get(did)
+            scheduler = schedulers.get(cfg['params'], default_scheduler) if cfg else default_scheduler
+            # FSRS-6 forgetting curve: R(t) = (1 + factor * t/S) ** decay
+            w20 = scheduler.parameters[20]
+            decay = -w20
+            factor = 0.9 ** (1.0 / decay) - 1.0
+
+        ts = datetime.fromtimestamp(rid / 1000, tz=timezone.utc)
+
+        if card.last_review is not None:
+            elapsed = (ts - card.last_review).total_seconds() / 86400.0
+            predicted_r = scheduler.get_card_retrievability(card, ts)
+        else:
+            elapsed = np.nan
+            predicted_r = np.nan
+
+        s_before = card.stability if card.stability is not None else np.nan
+        card, _ = scheduler.review_card(card, Rating(ease), ts)
+
+        cols['cid'].append(cid)
+        cols['did'].append(did)
+        cols['ts'].append(rid // 1000)
+        cols['rating'].append(ease)
+        cols['review_type'].append(rtype)
+        cols['elapsed_days'].append(elapsed)
+        cols['predicted_r'].append(predicted_r)
+        cols['s_before'].append(s_before)
+        cols['s_after'].append(card.stability)
+        cols['d_after'].append(card.difficulty)
+        cols['decay'].append(decay)
+        cols['factor'].append(factor)
+
+    df = pd.DataFrame(cols)
+    _replay_cache['key'] = cache_key
+    _replay_cache['df'] = df
+    return df
+
+
+def validate_replay(deck_id: int | None = None) -> pd.DataFrame:
+    """
+    Diagnostic: compare replayed final memory states against the FSRS
+    snapshot Anki stores in cards.data. Returns per-card comparison with
+    relative stability error.
+    """
+    import json
+
+    df = replay_reviews(deck_id)
+    if df.empty:
+        return pd.DataFrame()
+
+    final = df.groupby('cid').tail(1)[['cid', 's_after', 'd_after']]
+
+    conn = connect_db()
+    snap_rows = conn.execute("""
+        SELECT c.id, c.data FROM cards c
+        WHERE c.data IS NOT NULL AND c.data != '' AND c.type IN (1, 2)
+    """).fetchall()
+    conn.close()
+
+    snapshots = {}
+    for cid, data_json in snap_rows:
+        try:
+            data = json.loads(data_json)
+        except (ValueError, TypeError):
+            continue
+        if 's' in data and 'd' in data:
+            snapshots[cid] = (data['s'], data['d'])
+
+    final = final[final['cid'].isin(snapshots)].copy()
+    final['s_anki'] = final['cid'].map(lambda c: snapshots[c][0])
+    final['d_anki'] = final['cid'].map(lambda c: snapshots[c][1])
+    final['s_rel_err'] = (final['s_after'] - final['s_anki']).abs() / final['s_anki'].clip(lower=0.01)
+    final['d_abs_err'] = (final['d_after'] - final['d_anki']).abs()
+    return final
+
+
+# =============================================================================
+# KNOWN WORDS (expected vocabulary) TIME SERIES
+# =============================================================================
+
+def get_known_words_timeseries(deck_id: int | None = None) -> pd.DataFrame:
+    """
+    Expected number of currently-recallable cards over time:
+    for each day d, sum of retrievability R(d) over every card seen so far.
+
+    Returns DataFrame with columns: date, expected_known, cards_seen, known_pct
+    """
+    df = replay_reviews(deck_id)
+    if df.empty:
+        return pd.DataFrame(columns=['date', 'expected_known', 'cards_seen', 'known_pct'])
+
+    first_day = pd.Timestamp(datetime.fromtimestamp(df['ts'].min()).date())
+    today = pd.Timestamp(datetime.now().date())
+    dates = pd.date_range(first_day, today, freq='D')
+    # Evaluate at local midnight of each day, in epoch seconds
+    day_ts = dates.map(lambda d: d.timestamp()).to_numpy(dtype=np.float64)
+    n_days = len(dates)
+
+    known = np.zeros(n_days)
+    seen = np.zeros(n_days, dtype=np.int64)
+
+    ts_arr = df['ts'].to_numpy(dtype=np.float64)
+    s_arr = df['s_after'].to_numpy(dtype=np.float64)
+    cid_arr = df['cid'].to_numpy()
+    decay_arr = df['decay'].to_numpy(dtype=np.float64)
+    factor_arr = df['factor'].to_numpy(dtype=np.float64)
+
+    # Card boundaries (rows are sorted by cid, ts)
+    boundaries = np.flatnonzero(np.r_[True, cid_arr[1:] != cid_arr[:-1], True])
+
+    for b in range(len(boundaries) - 1):
+        lo, hi = boundaries[b], boundaries[b + 1]
+        for i in range(lo, hi):
+            seg_start_ts = ts_arr[i]
+            seg_end_ts = ts_arr[i + 1] if i + 1 < hi else np.inf
+            stability = s_arr[i]
+            if not stability > 0:
+                continue
+            # Grid days strictly after this review, up to (excluding) the next
+            start_idx = np.searchsorted(day_ts, seg_start_ts, side='right')
+            end_idx = np.searchsorted(day_ts, seg_end_ts, side='right') if np.isfinite(seg_end_ts) else n_days
+            if start_idx >= end_idx:
+                continue
+            t = (day_ts[start_idx:end_idx] - seg_start_ts) / 86400.0
+            known[start_idx:end_idx] += (1.0 + factor_arr[i] * t / stability) ** decay_arr[i]
+            seen[start_idx:end_idx] += 1
+
+    result = pd.DataFrame({
+        'date': dates,
+        'expected_known': known,
+        'cards_seen': seen,
+    })
+    result['known_pct'] = np.where(seen > 0, known / np.maximum(seen, 1) * 100, 0.0)
+    return result
+
+
+# =============================================================================
+# PLANNING: RETENTION <-> WORKLOAD, COMPLETION PROJECTION
+# =============================================================================
+
+def get_retention_workload_curve(deck_id: int | None = None) -> dict:
+    """
+    Sweep desired retention and compute the equilibrium review workload it
+    implies for the current collection: Σ 1/interval_i(R_d), where each
+    card's next interval comes from its stability and its preset's
+    forgetting curve: I(R_d, S) = S/factor * (R_d^(1/decay) - 1).
+
+    Returns {'curve': DataFrame[retention, reviews_per_day, avg_interval],
+             'current_retention': float, 'n_cards': int}
+    """
+    import json
+
+    deck_configs = get_deck_fsrs_configs()
+
+    conn = connect_db()
+    deck_filter = f'AND c.did = {int(deck_id)}' if deck_id is not None else ''
+    rows = conn.execute(f"""
+        SELECT c.did, c.data FROM cards c
+        WHERE c.queue = 2 AND c.data IS NOT NULL AND c.data != ''
+          {deck_filter}
+    """).fetchall()
+    conn.close()
+
+    stabilities, decays = [], []
+    retentions_cfg = []
+    for did, data_json in rows:
+        try:
+            data = json.loads(data_json)
+        except (ValueError, TypeError):
+            continue
+        s = data.get('s')
+        if not s or s <= 0:
+            continue
+        cfg = deck_configs.get(did) or {'params': None, 'desired_retention': 0.9}
+        params = cfg['params']
+        w20 = params[20] if params else 0.1542  # py-fsrs default decay param
+        stabilities.append(s)
+        decays.append(-w20)
+        retentions_cfg.append(cfg['desired_retention'])
+
+    if not stabilities:
+        return {'curve': pd.DataFrame(columns=['retention', 'reviews_per_day', 'avg_interval']),
+                'current_retention': 0.9, 'n_cards': 0}
+
+    s_arr = np.array(stabilities)
+    decay_arr = np.array(decays)
+    factor_arr = 0.9 ** (1.0 / decay_arr) - 1.0
+
+    grid = np.round(np.arange(0.70, 0.971, 0.005), 3)
+    loads, avg_ivls = [], []
+    for r_d in grid:
+        ivl = s_arr / factor_arr * (r_d ** (1.0 / decay_arr) - 1.0)
+        ivl = np.clip(ivl, 1.0, None)
+        loads.append(float(np.sum(1.0 / ivl)))
+        avg_ivls.append(float(np.mean(ivl)))
+
+    curve = pd.DataFrame({
+        'retention': grid,
+        'reviews_per_day': loads,
+        'avg_interval': avg_ivls,
+    })
+    # Collection-level current setting: the modal preset value
+    current_retention = float(pd.Series(retentions_cfg).mode().iloc[0])
+
+    return {'curve': curve, 'current_retention': current_retention, 'n_cards': len(s_arr)}
+
+
+def get_completion_projection(deck_id: int | None = None) -> dict:
+    """
+    Historical cumulative card introductions + remaining new cards, for
+    projecting deck completion at candidate new-card paces.
+
+    Returns {'intro_curve': DataFrame[date, cum_introduced],
+             'introduced': int, 'remaining_new': int}
+    """
+    df = replay_reviews(deck_id)
+
+    conn = connect_db()
+    deck_filter = f'AND c.did = {int(deck_id)}' if deck_id is not None else ''
+    remaining_new = conn.execute(f"""
+        SELECT COUNT(*) FROM cards c WHERE c.queue = 0 {deck_filter}
+    """).fetchone()[0]
+    conn.close()
+
+    if df.empty:
+        return {'intro_curve': pd.DataFrame(columns=['date', 'cum_introduced']),
+                'introduced': 0, 'remaining_new': remaining_new}
+
+    first_seen = df.groupby('cid')['ts'].min()
+    intro_dates = pd.to_datetime(first_seen, unit='s').dt.normalize()
+    daily = intro_dates.value_counts().sort_index()
+    full_range = pd.date_range(daily.index.min(), pd.Timestamp(datetime.now().date()), freq='D')
+    cum = daily.reindex(full_range, fill_value=0).cumsum()
+
+    intro_curve = pd.DataFrame({'date': cum.index, 'cum_introduced': cum.to_numpy()})
+    return {
+        'intro_curve': intro_curve,
+        'introduced': int(len(first_seen)),
+        'remaining_new': int(remaining_new),
+    }
+
+
+# =============================================================================
+# SESSION FATIGUE
+# =============================================================================
+
+def get_fatigue_curve(
+    deck_id: int | None = None,
+    gap_minutes: int = 30,
+    bin_size: int = 10,
+    max_position: int = 120,
+    min_bin_n: int = 50,
+) -> pd.DataFrame:
+    """
+    Accuracy and answer time as a function of position within a study
+    session (sessions split on >gap_minutes idle). Reveals whether recall
+    degrades after N cards in one sitting.
+
+    Returns DataFrame: position (bin center), success_rate, ci_low,
+    ci_high, avg_time_s, n
+    """
+    conn = connect_db()
+    deck_filter = f'AND c.did = {int(deck_id)}' if deck_id is not None else ''
+    df = pd.read_sql_query(f"""
+        SELECT r.id / 1000 AS ts, r.ease, r.time AS time_ms
+        FROM revlog r
+        JOIN cards c ON r.cid = c.id
+        WHERE r.type IN (0, 1, 2, 3)
+          AND r.ease BETWEEN 1 AND 4
+          {deck_filter}
+        ORDER BY r.id
+    """, conn)
+    conn.close()
+
+    if df.empty:
+        return pd.DataFrame(columns=['position', 'success_rate', 'ci_low', 'ci_high', 'avg_time_s', 'n'])
+
+    session_id = (df['ts'].diff() > gap_minutes * 60).cumsum()
+    df['position'] = df.groupby(session_id).cumcount() + 1
+    df = df[df['position'] <= max_position].copy()
+    df['recalled'] = (df['ease'] >= 2).astype(float)
+    df['bin'] = (df['position'] - 1) // bin_size
+
+    grouped = df.groupby('bin').agg(
+        successes=('recalled', 'sum'),
+        n=('recalled', 'size'),
+        avg_time_s=('time_ms', lambda t: t.mean() / 1000.0),
+    ).reset_index()
+    grouped = grouped[grouped['n'] >= min_bin_n].copy()
+    if grouped.empty:
+        return pd.DataFrame(columns=['position', 'success_rate', 'ci_low', 'ci_high', 'avg_time_s', 'n'])
+
+    grouped['position'] = grouped['bin'] * bin_size + bin_size / 2
+    grouped['success_rate'] = grouped['successes'] / grouped['n'] * 100
+    ci_low, ci_high = _wilson_interval(
+        grouped['successes'].to_numpy(), grouped['n'].to_numpy())
+    grouped['ci_low'] = ci_low * 100
+    grouped['ci_high'] = ci_high * 100
+
+    return grouped[['position', 'success_rate', 'ci_low', 'ci_high', 'avg_time_s', 'n']]
+
+
+# =============================================================================
+# COHORT LEARNING CURVES
+# =============================================================================
+
+def get_cohort_maturity_curves(
+    deck_id: int | None = None,
+    threshold: float = 30.0,
+    max_age_days: int = 365,
+    step_days: int = 7,
+) -> pd.DataFrame:
+    """
+    For cards grouped by introduction year, track the share of the cohort
+    whose replayed stability exceeds `threshold` (the app's maturity bar)
+    as a function of card age. Cards are right-censored at their current
+    age, and lapses that knock stability back down are reflected honestly
+    (this is state occupancy, not one-way survival).
+
+    Returns long DataFrame: cohort, age_days, pct_mature, n
+    """
+    df = replay_reviews(deck_id)
+    if df.empty:
+        return pd.DataFrame(columns=['cohort', 'age_days', 'pct_mature', 'n'])
+
+    now_ts = datetime.now().timestamp()
+    age_grid = np.arange(0, max_age_days + 1, step_days, dtype=np.float64)
+
+    ts_arr = df['ts'].to_numpy(dtype=np.float64)
+    s_arr = df['s_after'].to_numpy(dtype=np.float64)
+    cid_arr = df['cid'].to_numpy()
+    boundaries = np.flatnonzero(np.r_[True, cid_arr[1:] != cid_arr[:-1], True])
+
+    # cohort -> (mature_counts, observed_counts) per grid point
+    acc: dict[int, list[np.ndarray]] = {}
+
+    for b in range(len(boundaries) - 1):
+        lo, hi = boundaries[b], boundaries[b + 1]
+        first_ts = ts_arr[lo]
+        cohort = datetime.fromtimestamp(first_ts).year
+        review_ages = (ts_arr[lo:hi] - first_ts) / 86400.0
+        stabilities = s_arr[lo:hi]
+        card_age = (now_ts - first_ts) / 86400.0
+
+        # Stability step function evaluated on the age grid
+        idx = np.searchsorted(review_ages, age_grid, side='right') - 1
+        observed = (age_grid <= card_age) & (idx >= 0)
+        stab_at_age = np.where(idx >= 0, stabilities[np.clip(idx, 0, None)], 0.0)
+        mature = observed & (stab_at_age >= threshold)
+
+        if cohort not in acc:
+            acc[cohort] = [np.zeros(len(age_grid)), np.zeros(len(age_grid))]
+        acc[cohort][0] += mature
+        acc[cohort][1] += observed
+
+    records = []
+    for cohort in sorted(acc):
+        mature_n, obs_n = acc[cohort]
+        valid = obs_n >= 10  # suppress noisy tails
+        for age, m, n in zip(age_grid[valid], mature_n[valid], obs_n[valid]):
+            records.append({
+                'cohort': cohort,
+                'age_days': age,
+                'pct_mature': m / n * 100,
+                'n': int(n),
+            })
+
+    return pd.DataFrame(records)
+
+
+# =============================================================================
+# MODEL CALIBRATION
+# =============================================================================
+
+def _wilson_interval(successes: np.ndarray, n: np.ndarray, z: float = 1.96):
+    """Wilson score interval for binomial proportions (vectorized)."""
+    p = successes / n
+    denom = 1.0 + z ** 2 / n
+    center = (p + z ** 2 / (2 * n)) / denom
+    half = z * np.sqrt(p * (1 - p) / n + z ** 2 / (4 * n ** 2)) / denom
+    return center - half, center + half
+
+
+def get_calibration_data(deck_id: int | None = None, n_bins: int = 15) -> pd.DataFrame:
+    """
+    Bin reviews by FSRS-predicted retrievability and compare against
+    observed recall. Same-day reviews are excluded (learning steps, where
+    the power forgetting curve does not apply), matching FSRS evaluation
+    practice.
+
+    Returns DataFrame with columns:
+        predicted (bin mean), observed, n, ci_low, ci_high
+    """
+    df = replay_reviews(deck_id)
+    if df.empty:
+        return pd.DataFrame(columns=['predicted', 'observed', 'n', 'ci_low', 'ci_high'])
+
+    mask = df['predicted_r'].notna() & (df['elapsed_days'] >= 1.0)
+    sample = df.loc[mask, ['predicted_r', 'rating']].copy()
+    if len(sample) < 50:
+        return pd.DataFrame(columns=['predicted', 'observed', 'n', 'ci_low', 'ci_high'])
+
+    sample['recalled'] = (sample['rating'] >= 2).astype(float)
+    # Equal-count bins so sparse regions get wide bins instead of noise
+    sample['bin'] = pd.qcut(sample['predicted_r'], q=n_bins, duplicates='drop')
+
+    grouped = sample.groupby('bin', observed=True).agg(
+        predicted=('predicted_r', 'mean'),
+        observed=('recalled', 'mean'),
+        n=('recalled', 'size'),
+        successes=('recalled', 'sum'),
+    ).reset_index(drop=True)
+
+    ci_low, ci_high = _wilson_interval(
+        grouped['successes'].to_numpy(), grouped['n'].to_numpy())
+    grouped['ci_low'] = ci_low
+    grouped['ci_high'] = ci_high
+
+    return grouped[['predicted', 'observed', 'n', 'ci_low', 'ci_high']]
+
+
+def get_calibration_summary(deck_id: int | None = None) -> dict:
+    """Overall calibration verdict: mean predicted vs observed recall."""
+    df = replay_reviews(deck_id)
+    if df.empty:
+        return {'n': 0, 'mean_predicted': 0.0, 'mean_observed': 0.0, 'gap_pp': 0.0}
+
+    mask = df['predicted_r'].notna() & (df['elapsed_days'] >= 1.0)
+    sample = df.loc[mask]
+    if sample.empty:
+        return {'n': 0, 'mean_predicted': 0.0, 'mean_observed': 0.0, 'gap_pp': 0.0}
+
+    mean_pred = float(sample['predicted_r'].mean())
+    mean_obs = float((sample['rating'] >= 2).mean())
+    return {
+        'n': int(len(sample)),
+        'mean_predicted': mean_pred,
+        'mean_observed': mean_obs,
+        'gap_pp': (mean_obs - mean_pred) * 100,  # + means FSRS underestimates you
+    }
+
+
+def get_known_words_summary(deck_id: int | None = None) -> dict:
+    """Headline stats for the known-words metric."""
+    ts = get_known_words_timeseries(deck_id)
+    if ts.empty:
+        return {'known_now': 0, 'peak': 0, 'peak_date': None, 'delta_30d': 0.0}
+
+    known_now = float(ts['expected_known'].iloc[-1])
+    peak_idx = ts['expected_known'].idxmax()
+    delta_30d = known_now - float(ts['expected_known'].iloc[-31]) if len(ts) > 30 else known_now
+
+    return {
+        'known_now': round(known_now),
+        'peak': round(float(ts.loc[peak_idx, 'expected_known'])),
+        'peak_date': ts.loc[peak_idx, 'date'],
+        'delta_30d': round(delta_30d, 1),
+    }

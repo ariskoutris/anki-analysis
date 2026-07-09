@@ -187,6 +187,9 @@ INDEX_STRING = '''
             .chart-panel--wide {
                 grid-column: span 2;
             }
+            .chart-panel--full {
+                grid-column: 1 / -1;
+            }
 
             /* Toast message */
             .toast-msg {

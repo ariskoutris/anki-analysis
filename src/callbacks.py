@@ -20,7 +20,12 @@ from .charts_session import (
     create_future_load_chart,
 )
 from .charts_card import (
-    create_memory_state_chart,
+    create_known_words_chart,
+    create_calibration_chart,
+    create_completion_chart,
+    create_retention_workload_chart,
+    create_cohort_chart,
+    create_fatigue_chart,
     create_retrievability_distribution_chart,
     create_stability_distribution_chart,
     create_difficulty_distribution_chart,
@@ -36,6 +41,15 @@ from .data_loader import (
     get_session_summary_stats,
     get_workload_summary,
     get_knowledge_health_stats,
+)
+from .fsrs_engine import (
+    get_known_words_timeseries,
+    get_calibration_data,
+    get_calibration_summary,
+    get_completion_projection,
+    get_retention_workload_curve,
+    get_cohort_maturity_curves,
+    get_fatigue_curve,
 )
 
 
@@ -423,10 +437,15 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value, ui
 
 @callback(
     [
-        Output('chart-memory-state', 'figure'),
+        Output('chart-known-words', 'figure'),
+        Output('chart-calibration', 'figure'),
         Output('chart-retrievability-dist', 'figure'),
         Output('chart-stability-dist', 'figure'),
         Output('chart-difficulty-dist', 'figure'),
+        Output('chart-completion', 'figure'),
+        Output('chart-retention-workload', 'figure'),
+        Output('chart-cohorts', 'figure'),
+        Output('chart-fatigue', 'figure'),
     ],
     [Input('backup-refresh-token', 'data'),
      Input('deck-filter', 'value')],
@@ -450,11 +469,20 @@ def update_card_charts(_refresh_token, deck_value, ui_store):
     )
 
     if cards_df.empty:
-        return empty, empty, empty, empty
+        return (empty,) * 9
 
-    fig_memory = create_memory_state_chart(cards_df)
+    fig_known = create_known_words_chart(get_known_words_timeseries(deck_id=deck_id))
+    fig_calib = create_calibration_chart(
+        get_calibration_data(deck_id=deck_id),
+        summary=get_calibration_summary(deck_id=deck_id),
+    )
     fig_ret = create_retrievability_distribution_chart(cards_df)
     fig_stab = create_stability_distribution_chart(cards_df)
     fig_diff = create_difficulty_distribution_chart(cards_df)
+    fig_completion = create_completion_chart(get_completion_projection(deck_id=deck_id))
+    fig_retention = create_retention_workload_chart(get_retention_workload_curve(deck_id=deck_id))
+    fig_cohorts = create_cohort_chart(get_cohort_maturity_curves(deck_id=deck_id))
+    fig_fatigue = create_fatigue_chart(get_fatigue_curve(deck_id=deck_id))
 
-    return fig_memory, fig_ret, fig_stab, fig_diff
+    return (fig_known, fig_calib, fig_ret, fig_stab, fig_diff,
+            fig_completion, fig_retention, fig_cohorts, fig_fatigue)

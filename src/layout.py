@@ -208,19 +208,26 @@ def create_main_layout():
                     className='chart-panel',
                 ),
 
-                # Row 3
+                # Row 3 — hero: expected known cards over time
+                html.Div(
+                    dcc.Graph(id='chart-known-words', config={'displayModeBar': False},
+                              style={'height': CHART_HEIGHT, **DARK_BG}),
+                    className='chart-panel chart-panel--full',
+                ),
+
+                # Row 4
                 html.Div(
                     dcc.Graph(id='chart-future-load', config={'displayModeBar': False},
                               style={'height': CHART_HEIGHT, **DARK_BG}),
                     className='chart-panel chart-panel--wide',
                 ),
                 html.Div(
-                    dcc.Graph(id='chart-memory-state', config={'displayModeBar': False},
+                    dcc.Graph(id='chart-calibration', config={'displayModeBar': False},
                               style={'height': CHART_HEIGHT, **DARK_BG}),
                     className='chart-panel',
                 ),
 
-                # Row 4
+                # Row 5
                 html.Div(
                     dcc.Graph(id='chart-retrievability-dist', config={'displayModeBar': False},
                               style={'height': CHART_HEIGHT, **DARK_BG}),
@@ -233,6 +240,30 @@ def create_main_layout():
                 ),
                 html.Div(
                     dcc.Graph(id='chart-difficulty-dist', config={'displayModeBar': False},
+                              style={'height': CHART_HEIGHT, **DARK_BG}),
+                    className='chart-panel',
+                ),
+
+                # Row 6 — planning
+                html.Div(
+                    dcc.Graph(id='chart-completion', config={'displayModeBar': False},
+                              style={'height': CHART_HEIGHT, **DARK_BG}),
+                    className='chart-panel chart-panel--wide',
+                ),
+                html.Div(
+                    dcc.Graph(id='chart-retention-workload', config={'displayModeBar': False},
+                              style={'height': CHART_HEIGHT, **DARK_BG}),
+                    className='chart-panel',
+                ),
+
+                # Row 7 — learning dynamics
+                html.Div(
+                    dcc.Graph(id='chart-cohorts', config={'displayModeBar': False},
+                              style={'height': CHART_HEIGHT, **DARK_BG}),
+                    className='chart-panel chart-panel--wide',
+                ),
+                html.Div(
+                    dcc.Graph(id='chart-fatigue', config={'displayModeBar': False},
                               style={'height': CHART_HEIGHT, **DARK_BG}),
                     className='chart-panel',
                 ),

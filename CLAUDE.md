@@ -15,10 +15,11 @@ src/
   layout.py                 – create_stat_card, create_section_container, tab builders, create_main_layout
   callbacks.py              – All @callback functions + parse_time_range
   charts_session.py         – 5 session chart functions + session-mode helpers
-  charts_card.py            – 4 card chart functions (pure: DataFrame → Figure)
+  charts_card.py            – 9 card/analytics chart functions (pure: DataFrame → Figure)
   upload_handler.py         – .apkg file upload processing
   data_loader.py            – All SQL queries, FSRS calculations, DataFrame construction, summary stats
-pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly); managed with uv
+  fsrs_engine.py            – FSRS history replay (py-fsrs) + advanced analytics (see below)
+pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly, fsrs); managed with uv
 uv.lock                     – Pinned dependency lockfile
 data/                       – Not tracked. Contains single anki.db snapshot
 ```
@@ -96,6 +97,35 @@ Pure data layer. Every public function opens its own `sqlite3` connection via `c
 - `c.queue != -1` excludes suspended cards
 - Review timestamps are `r.id/1000` (ms → seconds since epoch)
 - Due dates for review cards: `collection_start + timedelta(days=c.due)`
+
+### fsrs_engine.py
+
+FSRS replay + advanced analytics layer (added 2026-07). Core idea: reconstruct
+per-review memory states by replaying the entire revlog through **py-fsrs**
+using each deck's own FSRS parameters, parsed from the `deck_config` protobuf
+blobs (fields 6/5/3 = FSRS-6/5/4.5 packed floats; field 37 = desired retention;
+17/19-param sets are migrated to 21 by appending `[0,0]` / `[0,0.5]`).
+Deck→preset mapping comes from the `decks.kind` protobuf (field 1.1 = config id).
+
+- `replay_reviews(deck_id)` – one row per genuine review (types 0-3, ease 1-4,
+  card still in collection) with predicted retrievability + stability/difficulty
+  before/after. Cached per (db mtime, deck_id). Validated against Anki's own
+  `cards.data` snapshot: difficulty exact, stability median rel-err ~3%
+  (residual = Anki day-cutoff rounding). Use `validate_replay()` to re-check.
+- `get_known_words_timeseries` – Σ retrievability over all seen cards per day
+  (hero chart, full-width row)
+- `get_calibration_data` / `get_calibration_summary` – predicted vs observed
+  recall, equal-count bins, Wilson CIs; same-day reviews excluded
+- `get_retention_workload_curve` – desired retention sweep → equilibrium
+  reviews/day via I(R_d,S) = S/factor · (R_d^(1/decay) − 1)
+- `get_completion_projection` – cumulative introductions + remaining new cards
+- `get_cohort_maturity_curves` – % of introduction-year cohort with stability
+  > 30d vs card age (state occupancy, right-censored)
+- `get_fatigue_curve` – accuracy/answer-time vs within-session position
+  (sessions split on >30 min gaps)
+
+FSRS-6 forgetting curve used throughout: `R(t) = (1 + factor·t/S)^decay`,
+`decay = −w20`, `factor = 0.9^(1/decay) − 1`.
 
 ### constants.py
 
