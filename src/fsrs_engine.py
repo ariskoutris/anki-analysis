@@ -653,26 +653,25 @@ def simulate_future(
             budget = max_reviews
             reviews_today = 0
 
+            # fsrs-rs priority: due ascending, then by difficulty. Over-limit
+            # cards are postponed to the *next* day (due = day+1) rather than
+            # kept at their old due — so they don't jump the queue, and a
+            # persistent backlog builds under sustained overload.
+            next_day = start + timedelta(days=day + 1)
             due_idx = [i for i, c in enumerate(cards) if c.due.date() <= day_end]
-            due_idx.sort(key=lambda i: cards[i].due)
+            due_idx.sort(key=lambda i: (cards[i].due, cards[i].difficulty or 0.0))
 
             for i in due_idx:
                 if budget <= 0:
-                    break
+                    # Postpone the remaining due cards to tomorrow.
+                    c = cards[i]
+                    cards[i] = Card(card_id=c.card_id, state=c.state, step=c.step,
+                                    stability=c.stability, difficulty=c.difficulty,
+                                    due=next_day, last_review=c.last_review)
+                    continue
                 guard = 0
                 while cards[i].due.date() <= day_end and budget > 0 and guard < 12:
                     c = cards[i]
-                    # Review at the scheduled interval, not the (possibly much
-                    # larger) real elapsed time of an overdue card. Anki's
-                    # simulator reviews each card on its due date; using the
-                    # true overdue gap would hand passed cards an outsized
-                    # stability boost and inflate the projection.
-                    if c.last_review is not None and c.due < date:
-                        ivl = c.due - c.last_review
-                        if ivl.total_seconds() > 0:
-                            c = Card(card_id=c.card_id, state=c.state, step=c.step,
-                                     stability=c.stability, difficulty=c.difficulty,
-                                     due=c.due, last_review=date - ivl)
                     r = scheduler.get_card_retrievability(c, date)
                     cards[i], _ = scheduler.review_card(c, sample_review_rating(rng, r), date)
                     budget -= 1
