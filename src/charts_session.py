@@ -40,24 +40,15 @@ def get_time_period_markers(df, date_col='date'):
 
 
 def add_session_time_markers(fig, markers, y_position='bottom'):
-    """Add vertical lines and annotations for year changes in session mode."""
+    """Add year-change divider lines with an offset label (matching the
+    median reference lines on the distribution charts)."""
     for marker in markers:
         fig.add_vline(
             x=marker['index'],
-            line_dash="dot",
-            line_color=COLORS['danger'],
-            line_width=2,
-            opacity=0.6
-        )
-
-        fig.add_annotation(
-            x=marker['index'],
-            y=1.02,
-            yref='paper',
-            text=marker['label'],
-            showarrow=False,
-            font=dict(size=11, color=COLORS['danger']),
-            textangle=0
+            line=dict(color='#e0e0e0', width=1, dash='dash'),
+            annotation_text=marker['label'],
+            annotation_position='top right',
+            annotation_font=dict(color='#8b8fa3', size=10),
         )
 
     return fig

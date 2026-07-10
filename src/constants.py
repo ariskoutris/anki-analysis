@@ -233,14 +233,6 @@ INDEX_STRING = '''
                 margin-top: 0 !important;
                 transform: none !important;
             }
-            .react-resizable-handle-e:hover,
-            .react-resizable-handle-w:hover,
-            .react-resizable-handle-se:hover,
-            .react-resizable-handle-sw:hover,
-            .react-resizable-handle-ne:hover,
-            .react-resizable-handle-nw:hover {
-                background: rgba(91, 141, 255, 0.18);
-            }
             /* Height is fixed — vertical-only handles are dead, hide them */
             .react-resizable-handle-n,
             .react-resizable-handle-s {

@@ -11,12 +11,7 @@ from dash import dcc, html, Input, Output, State, callback, clientside_callback,
 from .constants import COLORS
 from .upload_handler import process_apkg_upload
 from .anki_sync import sync_from_anki, get_sync_info
-from .layout import (
-    create_stat_item,
-    DEFAULT_GRID_LAYOUT,
-    sanitize_grid_item,
-    normalize_grid_resize,
-)
+from .layout import create_stat_item, DEFAULT_GRID_LAYOUT, sanitize_grid_item
 from .charts_session import (
     create_daily_reviews_chart,
     create_hourly_chart,
@@ -173,22 +168,81 @@ def update_overview_container(_refresh_token, _url, deck_value):
 # Callbacks: Persist / restore the draggable chart grid layout
 # ---------------------------------------------------------------------------
 
-@callback(
+# Save grid changes and normalize resizes, fully clientside (no server
+# round-trip). When an item's width changed, row membership is restored
+# from the previous stored layout and neighbours shrink so the row still
+# sums to 3 units; the corrected layout is re-applied just after the
+# component's own debounced itemLayout self-write (~50ms) has settled.
+clientside_callback(
+    """
+    function(current, prev) {
+        const nu = window.dash_clientside.no_update;
+        if (!Array.isArray(current) || !current.length) { return nu; }
+        const COLS = 3;
+        const pick = it => ({i: it.i, x: it.x, y: it.y, w: it.w, h: 1});
+        const canon = current.filter(it => it && typeof it.i === 'string').map(pick);
+
+        let out = canon;
+        if (Array.isArray(prev) && prev.length) {
+            const prevBy = {}, curBy = {};
+            prev.forEach(it => { if (it && it.i) { prevBy[it.i] = it; } });
+            canon.forEach(it => { curBy[it.i] = it; });
+            const pKeys = Object.keys(prevBy).sort(), cKeys = Object.keys(curBy).sort();
+            if (JSON.stringify(pKeys) === JSON.stringify(cKeys)) {
+                const resized = cKeys.filter(k => (curBy[k].w | 0) !== (prevBy[k].w | 0));
+                if (resized.length) {
+                    const target = resized[0];
+                    const rows = {};
+                    pKeys.forEach(k => {
+                        const y = prevBy[k].y | 0;
+                        (rows[y] = rows[y] || []).push(k);
+                    });
+                    const res = {};
+                    Object.keys(rows).forEach(yk => {
+                        const y = +yk;
+                        const members = rows[yk].sort((a, b) => (prevBy[a].x | 0) - (prevBy[b].x | 0));
+                        if (!members.includes(target)) {
+                            members.forEach(k => { res[k] = pick(prevBy[k]); });
+                            return;
+                        }
+                        const others = members.filter(k => k !== target);
+                        const wT = Math.max(1, Math.min(curBy[target].w | 0, COLS - others.length));
+                        const remaining = COLS - wT;
+                        const widths = {}; widths[target] = wT;
+                        if (others.length) {
+                            const prevTotal = others.reduce((s, k) => s + (prevBy[k].w | 0), 0);
+                            if (prevTotal <= remaining) {
+                                others.forEach(k => { widths[k] = prevBy[k].w | 0; });
+                                widths[others[others.length - 1]] += remaining - prevTotal;
+                            } else {
+                                others.forEach(k => { widths[k] = 1; });
+                                let slack = remaining - others.length;
+                                const order = others.slice().sort((a, b) => (prevBy[b].w | 0) - (prevBy[a].w | 0));
+                                let idx = 0;
+                                while (slack > 0) { widths[order[idx % order.length]] += 1; slack -= 1; idx += 1; }
+                            }
+                        }
+                        let x = 0;
+                        members.forEach(k => { res[k] = {i: k, x: x, y: y, w: widths[k], h: 1}; x += widths[k]; });
+                    });
+                    out = cKeys.map(k => res[k]).filter(Boolean);
+                    // Snap the grid to the corrected layout once the
+                    // component's internal debounced write has landed.
+                    setTimeout(function() {
+                        window.dash_clientside.set_props('chart-grid', {itemLayout: out});
+                        setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 120);
+                    }, 150);
+                }
+            }
+        }
+        return out;
+    }
+    """,
     Output('grid-layout-store', 'data'),
-    Output('chart-grid', 'itemLayout', allow_duplicate=True),
     Input('chart-grid', 'currentLayout'),
     State('grid-layout-store', 'data'),
     prevent_initial_call=True,
 )
-def save_grid_layout(current_layout, prev_layout):
-    """Persist grid changes. Width changes are normalized so neighbours
-    shrink in place instead of being pushed to the next row."""
-    if not current_layout:
-        return no_update, no_update
-    normalized = normalize_grid_resize(current_layout, prev_layout)
-    if normalized is None:
-        return current_layout, no_update
-    return normalized, normalized
 
 
 @callback(
