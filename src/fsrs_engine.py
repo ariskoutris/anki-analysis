@@ -662,6 +662,17 @@ def simulate_future(
                 guard = 0
                 while cards[i].due.date() <= day_end and budget > 0 and guard < 12:
                     c = cards[i]
+                    # Review at the scheduled interval, not the (possibly much
+                    # larger) real elapsed time of an overdue card. Anki's
+                    # simulator reviews each card on its due date; using the
+                    # true overdue gap would hand passed cards an outsized
+                    # stability boost and inflate the projection.
+                    if c.last_review is not None and c.due < date:
+                        ivl = c.due - c.last_review
+                        if ivl.total_seconds() > 0:
+                            c = Card(card_id=c.card_id, state=c.state, step=c.step,
+                                     stability=c.stability, difficulty=c.difficulty,
+                                     due=c.due, last_review=date - ivl)
                     r = scheduler.get_card_retrievability(c, date)
                     cards[i], _ = scheduler.review_card(c, sample_review_rating(rng, r), date)
                     budget -= 1
