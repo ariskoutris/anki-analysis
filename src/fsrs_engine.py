@@ -424,13 +424,16 @@ def get_completion_projection(deck_id: int | None = None) -> dict:
              'introduced': int, 'remaining_new': int}
     """
     df = replay_reviews(deck_id)
+    seen = set(df['cid'].unique()) if not df.empty else set()
 
     conn = connect_db()
     deck_filter = f'AND c.did = {int(deck_id)}' if deck_id is not None else ''
-    remaining_new = conn.execute(f"""
-        SELECT COUNT(*) FROM cards c WHERE c.queue = 0 {deck_filter}
-    """).fetchone()[0]
+    new_ids = [r[0] for r in conn.execute(
+        f"SELECT c.id FROM cards c WHERE c.queue = 0 {deck_filter}").fetchall()]
     conn.close()
+    # Exclude cards already counted as introduced (a reviewed card can be
+    # reset back to the new queue, which would otherwise double-count it).
+    remaining_new = sum(1 for cid in new_ids if cid not in seen)
 
     if df.empty:
         return {'intro_curve': pd.DataFrame(columns=['date', 'cum_introduced']),

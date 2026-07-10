@@ -724,20 +724,40 @@ def get_daily_load_history(days: int = 90, deck_id: int | None = None) -> pd.Dat
     return df
 
 
+def get_rollover_hour(default: int = 4) -> int:
+    """Anki's day-rollover hour (reviews before it belong to the previous day)."""
+    try:
+        conn = connect_db()
+        row = conn.execute("SELECT val FROM config WHERE key = 'rollover'").fetchone()
+        conn.close()
+        if row and row[0] is not None:
+            val = row[0].decode() if isinstance(row[0], bytes) else row[0]
+            return int(val)
+    except Exception:
+        pass
+    return default
+
+
 def get_consistency_stats(review_days: int | None = None, deck_id: int | None = None) -> dict:
     """
     Calculate study consistency statistics: streaks, gaps, and regularity.
+
+    Study days follow Anki's rollover hour (default 4am), so a late-night
+    session before the rollover counts toward the previous calendar day —
+    matching how Anki assigns reviews to days.
 
     Returns:
         Dictionary with streak and consistency metrics
     """
     conn = connect_db()
 
-    # Get all study dates
+    # Get all study dates, shifted back by the rollover so the day boundary
+    # sits at Anki's rollover hour rather than midnight.
+    rollover = get_rollover_hour()
     review_filter = build_time_filter(review_days)
     deck_filter = build_deck_filter(deck_id)
     query = f"""
-        SELECT DISTINCT date(r.id/1000, 'unixepoch', 'localtime') as study_date
+        SELECT DISTINCT date(r.id/1000, 'unixepoch', 'localtime', '-{rollover} hours') as study_date
         FROM revlog r
         JOIN cards c ON r.cid = c.id
         WHERE r.id > 0
@@ -762,7 +782,8 @@ def get_consistency_stats(review_days: int | None = None, deck_id: int | None = 
 
     df['study_date'] = pd.to_datetime(df['study_date']).dt.date
     study_dates = set(df['study_date'])
-    today = datetime.now().date()
+    # "Today" per the same rollover: before the rollover hour it's still yesterday.
+    today = (datetime.now() - timedelta(hours=rollover)).date()
 
     # Calculate current streak (consecutive days ending today or yesterday)
     current_streak = 0
