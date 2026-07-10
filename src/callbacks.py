@@ -53,6 +53,7 @@ from .fsrs_engine import (
     get_cohort_maturity_curves,
     get_fatigue_curve,
     simulate_future,
+    get_deck_sim_defaults,
 )
 
 
@@ -502,6 +503,21 @@ def auto_dismiss_upload_message(n):
 # ---------------------------------------------------------------------------
 # Callback: Forecast simulator
 # ---------------------------------------------------------------------------
+
+@callback(
+    [Output('sim-retention', 'value'),
+     Output('sim-new', 'value'),
+     Output('sim-maxrev', 'value')],
+    [Input('deck-filter', 'value'),
+     Input('url', 'pathname')],
+    prevent_initial_call=False,
+)
+def sync_sim_defaults_from_preset(deck_value, _url):
+    """Auto-fill the simulator inputs from the selected deck's Anki preset."""
+    deck_id = None if deck_value == 'all' else int(deck_value)
+    d = get_deck_sim_defaults(deck_id)
+    return d['retention'], d['new_per_day'], d['rev_per_day']
+
 
 @callback(
     [Output('chart-sim-memorized', 'figure'),

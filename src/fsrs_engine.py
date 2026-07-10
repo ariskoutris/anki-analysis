@@ -82,16 +82,35 @@ _FSRS_PARAM_FIELDS = (6, 5, 3)  # fsrs_params_6, fsrs_params_5, fsrs_params_4
 _DESIRED_RETENTION_FIELD = 37
 
 
+# DeckConfig.Config protobuf fields for scheduling settings
+_LEARN_STEPS_FIELD = 1       # repeated float, minutes
+_RELEARN_STEPS_FIELD = 2     # repeated float, minutes
+_NEW_PER_DAY_FIELD = 9       # uint32
+_REV_PER_DAY_FIELD = 10      # uint32
+
+
 def _parse_deck_config(blob: bytes) -> dict:
-    """Extract FSRS params + desired retention from a deck_config blob."""
+    """Extract FSRS params, retention, learning steps and daily limits."""
     param_arrays: dict[int, list[float]] = {}
     desired_retention = 0.9
+    learn_steps: list[float] = []
+    relearn_steps: list[float] = []
+    new_per_day = 20    # Anki defaults when the field is absent
+    rev_per_day = 200
 
     for field, wire, value in _iter_pb_fields(blob):
         if field in _FSRS_PARAM_FIELDS and wire == 2 and len(value) % 4 == 0 and len(value) >= 68:
             param_arrays[field] = list(struct.unpack(f'<{len(value) // 4}f', value))
         elif field == _DESIRED_RETENTION_FIELD and wire == 5:
             desired_retention = struct.unpack('<f', value)[0]
+        elif field == _LEARN_STEPS_FIELD and wire == 2 and len(value) % 4 == 0:
+            learn_steps = list(struct.unpack(f'<{len(value) // 4}f', value))
+        elif field == _RELEARN_STEPS_FIELD and wire == 2 and len(value) % 4 == 0:
+            relearn_steps = list(struct.unpack(f'<{len(value) // 4}f', value))
+        elif field == _NEW_PER_DAY_FIELD and wire == 0:
+            new_per_day = value
+        elif field == _REV_PER_DAY_FIELD and wire == 0:
+            rev_per_day = value
 
     params = None
     for field in _FSRS_PARAM_FIELDS:
@@ -100,7 +119,14 @@ def _parse_deck_config(blob: bytes) -> dict:
             if params:
                 break
 
-    return {'params': params, 'desired_retention': desired_retention}
+    return {
+        'params': params,
+        'desired_retention': desired_retention,
+        'learn_steps': learn_steps,
+        'relearn_steps': relearn_steps,
+        'new_per_day': int(new_per_day),
+        'rev_per_day': int(rev_per_day),
+    }
 
 
 def _parse_deck_kind_config_id(kind_blob: bytes) -> int | None:
@@ -128,7 +154,8 @@ def get_deck_fsrs_configs() -> dict[int, dict]:
 
     cursor.execute('SELECT id, kind FROM decks')
     deck_map = {}
-    default = {'params': None, 'desired_retention': 0.9}
+    default = {'params': None, 'desired_retention': 0.9,
+               'learn_steps': [], 'relearn_steps': [], 'new_per_day': 20, 'rev_per_day': 200}
     for deck_id, kind_blob in cursor.fetchall():
         config_id = _parse_deck_kind_config_id(kind_blob)
         deck_map[deck_id] = configs.get(config_id, default)
@@ -137,14 +164,25 @@ def get_deck_fsrs_configs() -> dict[int, dict]:
     return deck_map
 
 
-def _make_scheduler(params: tuple[float, ...] | None) -> Scheduler:
-    """Build a py-fsrs scheduler, falling back to defaults on bad params."""
+def _make_scheduler(params: tuple[float, ...] | None,
+                    learn_steps: list[float] | None = None,
+                    relearn_steps: list[float] | None = None) -> Scheduler:
+    """
+    Build a py-fsrs scheduler, falling back to defaults on bad params.
+    Learning/relearning steps (minutes, from the deck preset) are passed
+    through when provided so the simulator schedules like the real deck.
+    """
+    kwargs = {'enable_fuzzing': False}
+    if learn_steps:
+        kwargs['learning_steps'] = tuple(timedelta(minutes=m) for m in learn_steps)
+    if relearn_steps:
+        kwargs['relearning_steps'] = tuple(timedelta(minutes=m) for m in relearn_steps)
     if params:
         try:
-            return Scheduler(parameters=params, enable_fuzzing=False)
+            return Scheduler(parameters=params, **kwargs)
         except ValueError:
             pass
-    return Scheduler(enable_fuzzing=False)
+    return Scheduler(**kwargs)
 
 
 # =============================================================================
@@ -501,6 +539,21 @@ def _load_sim_cards(deck_id: int | None) -> tuple[list[dict], int]:
     return cards, int(new_count)
 
 
+def get_deck_sim_defaults(deck_id: int | None = None) -> dict:
+    """
+    Simulator input defaults drawn from the deck's Anki preset:
+    desired retention (%), new cards/day, and reviews/day limit.
+    """
+    cfg = get_deck_fsrs_configs().get(deck_id) if deck_id is not None else None
+    if not cfg:
+        return {'retention': 90, 'new_per_day': 20, 'rev_per_day': 200}
+    return {
+        'retention': round(cfg['desired_retention'] * 100),
+        'new_per_day': cfg['new_per_day'],
+        'rev_per_day': cfg['rev_per_day'],
+    }
+
+
 def get_rating_distributions(deck_id: int | None = None) -> tuple[list[float], list[float]]:
     """
     Rating probabilities measured from the deck's own revlog, mirroring how
@@ -555,7 +608,11 @@ def simulate_future(
     """
     cfg = get_deck_fsrs_configs().get(deck_id) if deck_id is not None else None
     params = cfg['params'] if cfg else None
-    scheduler = _make_scheduler(params)
+    scheduler = _make_scheduler(
+        params,
+        learn_steps=cfg['learn_steps'] if cfg else None,
+        relearn_steps=cfg['relearn_steps'] if cfg else None,
+    )
     scheduler.desired_retention = float(desired_retention)
 
     # Forgetting-curve constants for the vectorized 'memorized' sum
