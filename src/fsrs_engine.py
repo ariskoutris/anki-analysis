@@ -501,6 +501,35 @@ def _load_sim_cards(deck_id: int | None) -> tuple[list[dict], int]:
     return cards, int(new_count)
 
 
+def get_rating_distributions(deck_id: int | None = None) -> tuple[list[float], list[float]]:
+    """
+    Rating probabilities measured from the deck's own revlog, mirroring how
+    Anki's simulator personalizes the forecast:
+      - first_prob:   [Again, Hard, Good, Easy] on a card's first exposure
+      - success_prob: [Hard, Good, Easy] given a non-lapse on later reviews
+    Falls back to Anki's generic defaults when data is sparse (<100 reviews).
+    """
+    conn = connect_db()
+    deck_filter = f'AND c.did = {int(deck_id)}' if deck_id is not None else ''
+    first = dict(conn.execute(f"""
+        SELECT r.ease, COUNT(*) FROM revlog r JOIN cards c ON r.cid = c.id
+        WHERE r.type = 0 AND r.ease BETWEEN 1 AND 4 {deck_filter} GROUP BY r.ease
+    """).fetchall())
+    succ = dict(conn.execute(f"""
+        SELECT r.ease, COUNT(*) FROM revlog r JOIN cards c ON r.cid = c.id
+        WHERE r.type = 1 AND r.ease BETWEEN 2 AND 4 {deck_filter} GROUP BY r.ease
+    """).fetchall())
+    conn.close()
+
+    ft = sum(first.get(e, 0) for e in (1, 2, 3, 4))
+    first_prob = ([first.get(e, 0) / ft for e in (1, 2, 3, 4)]
+                  if ft >= 100 else [0.24, 0.094, 0.495, 0.171])
+    st = sum(succ.get(e, 0) for e in (2, 3, 4))
+    success_prob = ([succ.get(e, 0) / st for e in (2, 3, 4)]
+                    if st >= 100 else [0.224, 0.631, 0.145])
+    return first_prob, success_prob
+
+
 def simulate_future(
     deck_id: int | None = None,
     days: int = 365,
@@ -540,12 +569,11 @@ def simulate_future(
     mem_acc = np.zeros(days)
     rev_acc = np.zeros(days)
 
-    # Anki's default rating distributions (SimulatorConfig defaults):
-    # first review of a new card, and success ratings on later reviews.
+    # Rating distributions measured from the deck's own revlog (like Anki),
+    # falling back to generic defaults when data is sparse.
     FIRST = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy]
-    FIRST_P = [0.24, 0.094, 0.495, 0.171]
     SUCCESS = [Rating.Hard, Rating.Good, Rating.Easy]
-    SUCCESS_P = [0.224, 0.631, 0.145]
+    FIRST_P, SUCCESS_P = get_rating_distributions(deck_id)
     start_ts = start.timestamp()
 
     def sample_review_rating(rng, r):
@@ -583,7 +611,9 @@ def simulate_future(
                     reviews_today += 1
                     guard += 1
 
-            # Introduce new cards (their learning reps are extra, not budgeted)
+            # Introduce new cards. Their learning reps are tracked separately
+            # from reviews_today (Anki counts learning apart from reviews and
+            # never lets the reviews line exceed the review limit).
             n_new = min(new_per_day, pool)
             for _ in range(n_new):
                 c = Card()
@@ -594,7 +624,6 @@ def simulate_future(
                     else:
                         rating = sample_review_rating(rng, scheduler.get_card_retrievability(c, date))
                     c, _ = scheduler.review_card(c, rating, date)
-                    reviews_today += 1
                     guard += 1
                     if c.due.date() > day_end:
                         break
