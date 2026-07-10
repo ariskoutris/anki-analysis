@@ -10,16 +10,18 @@ cohort analyses. Results are cached per (db mtime, deck_id) since replaying
 the log is the most expensive computation in the app.
 """
 
+import json
 import os
+import random
 import struct
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 import pandas as pd
-from fsrs import Scheduler, Card, Rating
+from fsrs import Scheduler, Card, Rating, State
 
 from .config import get_db_path
-from .data_loader import connect_db
+from .data_loader import connect_db, get_collection_start_date
 
 
 # =============================================================================
@@ -451,6 +453,169 @@ def get_completion_projection(deck_id: int | None = None) -> dict:
         'introduced': int(len(first_seen)),
         'remaining_new': int(remaining_new),
     }
+
+
+# =============================================================================
+# FORWARD SIMULATION (FSRS simulator)
+# =============================================================================
+
+def _load_sim_cards(deck_id: int | None) -> tuple[list[dict], int]:
+    """
+    Snapshot the current review/learning cards as plain dicts (stability,
+    difficulty, due datetime, last_review datetime) plus the count of
+    available new cards. Suspended and already-new cards are excluded from
+    the review set; new-card pool = non-suspended queue==0 cards.
+    """
+    conn = connect_db()
+    collection_start = get_collection_start_date()
+    deck_filter = f'AND c.did = {int(deck_id)}' if deck_id is not None else ''
+
+    rows = conn.execute(f"""
+        SELECT c.id, c.data, c.queue, c.due, c.type
+        FROM cards c
+        WHERE c.queue IN (1, 2, 3)
+          AND c.data IS NOT NULL AND c.data != ''
+          {deck_filter}
+    """).fetchall()
+    new_count = conn.execute(
+        f"SELECT COUNT(*) FROM cards c WHERE c.queue = 0 {deck_filter}").fetchone()[0]
+    conn.close()
+
+    cards = []
+    for cid, data_json, queue, due, ctype in rows:
+        try:
+            data = json.loads(data_json)
+        except (ValueError, TypeError):
+            continue
+        s, d = data.get('s'), data.get('d')
+        if not s or not d or s <= 0:
+            continue
+        lrt = data.get('lrt', 0)
+        last_review = datetime.fromtimestamp(lrt, tz=timezone.utc) if lrt else None
+        if queue == 2:
+            due_dt = collection_start.replace(tzinfo=timezone.utc) + timedelta(days=int(due))
+        else:  # learning / relearning: due is an epoch timestamp
+            due_dt = datetime.fromtimestamp(int(due), tz=timezone.utc)
+        cards.append({'s': float(s), 'd': float(d), 'due': due_dt, 'last_review': last_review})
+
+    return cards, int(new_count)
+
+
+def simulate_future(
+    deck_id: int | None = None,
+    days: int = 365,
+    desired_retention: float = 0.9,
+    new_per_day: int = 0,
+    max_reviews: int = 9999,
+    additional_new: int = 0,
+    n_runs: int = 3,
+    seed: int = 42,
+) -> pd.DataFrame:
+    """
+    Monte-Carlo forward simulation of the FSRS scheduler for the current
+    collection, mirroring Anki's FSRS simulator.
+
+    Each simulated day: due cards (capped at max_reviews) are reviewed —
+    passed with probability equal to their current retrievability, failed
+    otherwise — and new cards are introduced up to new_per_day. Learning
+    steps collapse within the day. 'Memorized' is Σ retrievability across
+    all introduced cards (same metric as the known-words chart), so the
+    projection continues that curve smoothly.
+
+    Returns DataFrame: date, memorized, reviews_per_day (means over runs).
+    """
+    cfg = get_deck_fsrs_configs().get(deck_id) if deck_id is not None else None
+    params = cfg['params'] if cfg else None
+    scheduler = _make_scheduler(params)
+    scheduler.desired_retention = float(desired_retention)
+
+    # Forgetting-curve constants for the vectorized 'memorized' sum
+    decay = -scheduler.parameters[20]
+    factor = 0.9 ** (1.0 / decay) - 1.0
+
+    base_cards, new_count = _load_sim_cards(deck_id)
+    pool0 = new_count + int(additional_new)
+
+    start = datetime.now(timezone.utc).replace(hour=12, minute=0, second=0, microsecond=0)
+    mem_acc = np.zeros(days)
+    rev_acc = np.zeros(days)
+
+    # Anki's default rating distributions (SimulatorConfig defaults):
+    # first review of a new card, and success ratings on later reviews.
+    FIRST = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy]
+    FIRST_P = [0.24, 0.094, 0.495, 0.171]
+    SUCCESS = [Rating.Hard, Rating.Good, Rating.Easy]
+    SUCCESS_P = [0.224, 0.631, 0.145]
+    start_ts = start.timestamp()
+
+    def sample_review_rating(rng, r):
+        """Again on lapse (prob 1-r); else Hard/Good/Easy per Anki weights."""
+        if rng.random() >= r:
+            return Rating.Again
+        return rng.choices(SUCCESS, SUCCESS_P)[0]
+
+    for run in range(n_runs):
+        rng = random.Random(seed + run)
+        # Fresh mutable card objects for this run
+        cards = [Card(stability=c['s'], difficulty=c['d'], state=State.Review,
+                      due=c['due'], last_review=c['last_review']) for c in base_cards]
+        pool = pool0
+
+        for day in range(days):
+            date = start + timedelta(days=day)
+            day_ts = date.timestamp()
+            day_end = date.date()
+            budget = max_reviews
+            reviews_today = 0
+
+            due_idx = [i for i, c in enumerate(cards) if c.due.date() <= day_end]
+            due_idx.sort(key=lambda i: cards[i].due)
+
+            for i in due_idx:
+                if budget <= 0:
+                    break
+                guard = 0
+                while cards[i].due.date() <= day_end and budget > 0 and guard < 12:
+                    c = cards[i]
+                    r = scheduler.get_card_retrievability(c, date)
+                    cards[i], _ = scheduler.review_card(c, sample_review_rating(rng, r), date)
+                    budget -= 1
+                    reviews_today += 1
+                    guard += 1
+
+            # Introduce new cards (their learning reps are extra, not budgeted)
+            n_new = min(new_per_day, pool)
+            for _ in range(n_new):
+                c = Card()
+                guard = 0
+                while guard < 12:
+                    if c.stability is None:
+                        rating = rng.choices(FIRST, FIRST_P)[0]
+                    else:
+                        rating = sample_review_rating(rng, scheduler.get_card_retrievability(c, date))
+                    c, _ = scheduler.review_card(c, rating, date)
+                    reviews_today += 1
+                    guard += 1
+                    if c.due.date() > day_end:
+                        break
+                cards.append(c)
+                pool -= 1
+
+            # Vectorized 'memorized' = Σ retrievability over reviewed cards
+            stabs = np.fromiter((c.stability for c in cards if c.stability), dtype=np.float64)
+            if stabs.size:
+                lrs = np.fromiter((c.last_review.timestamp() for c in cards if c.stability),
+                                  dtype=np.float64)
+                t = np.maximum((day_ts - lrs) / 86400.0, 0.0)
+                mem_acc[day] += np.sum((1.0 + factor * t / stabs) ** decay)
+            rev_acc[day] += reviews_today
+
+    dates = [(start + timedelta(days=d)).date() for d in range(days)]
+    return pd.DataFrame({
+        'date': pd.to_datetime(dates),
+        'memorized': mem_acc / n_runs,
+        'reviews_per_day': rev_acc / n_runs,
+    })
 
 
 # =============================================================================

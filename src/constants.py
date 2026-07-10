@@ -239,6 +239,33 @@ INDEX_STRING = '''
                 display: none;
             }
 
+            /* Forecast simulator */
+            .sim-section { margin-top: 20px; }
+            .sim-header {
+                display: flex; justify-content: space-between; align-items: flex-end;
+                flex-wrap: wrap; gap: 16px; margin-bottom: 10px;
+            }
+            .section__title { font-size: 15px; font-weight: 600; color: #e0e0e0; margin: 0; }
+            .section__desc { font-size: 12px; color: #8b8fa3; margin: 2px 0 0; }
+            .sim-controls { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
+            .sim-input { display: flex; flex-direction: column; gap: 3px; }
+            .sim-input__label { font-size: 10px; color: #8b8fa3; text-transform: uppercase; letter-spacing: 0.4px; }
+            .sim-input__wrap { display: flex; align-items: center; gap: 4px; }
+            .sim-input__field {
+                width: 84px; padding: 5px 8px; font-size: 13px;
+                background: #181b23; color: #e0e0e0;
+                border: 1px solid #2a2d3a; border-radius: 4px;
+            }
+            .sim-input__field:focus { outline: none; border-color: #5b8dff; }
+            .sim-input__suffix { font-size: 12px; color: #8b8fa3; }
+            .sim-run-btn {
+                padding: 6px 18px; font-size: 13px; font-weight: 600;
+                background: #5b8dff; color: #fff; border: none; border-radius: 4px; cursor: pointer;
+            }
+            .sim-run-btn:hover { background: #7aa2ff; }
+            .sim-charts { display: flex; gap: 8px; }
+            @media (max-width: 900px) { .sim-charts { flex-direction: column; } }
+
             /* Toast message */
             .toast-msg {
                 position: fixed;

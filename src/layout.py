@@ -8,6 +8,7 @@ from dash import dcc, html
 
 from .constants import COLORS
 from .data_loader import get_deck_list
+from .charts_card import create_sim_memorized_chart, create_sim_reviews_chart
 
 
 CHART_HEIGHT = '280px'
@@ -72,6 +73,56 @@ def _grid_chart(wrapper_id):
         handleBackground='#181b23',
         handleColor='#5a5e72',
     )
+
+def _sim_input(label, input_id, value, suffix=None, **input_kwargs):
+    """A labelled numeric input for the forecast simulator control row."""
+    return html.Div([
+        html.Label(label, className='sim-input__label'),
+        html.Div([
+            dcc.Input(id=input_id, type='number', value=value,
+                      className='sim-input__field', debounce=True, **input_kwargs),
+            html.Span(suffix, className='sim-input__suffix') if suffix else None,
+        ], className='sim-input__wrap'),
+    ], className='sim-input')
+
+
+def create_simulator_section():
+    """Forecast simulator: controls + memorized/reviews projection charts."""
+    return html.Div([
+        html.Div([
+            html.Div([
+                html.H2('Forecast Simulator', className='section__title'),
+                html.P('Monte-Carlo projection from your current cards, using this '
+                       'deck’s FSRS parameters.', className='section__desc'),
+            ]),
+            html.Div([
+                _sim_input('Days', 'sim-days', 365, min=30, max=1825, step=1),
+                _sim_input('Desired retention', 'sim-retention', 90, suffix='%',
+                           min=70, max=97, step=1),
+                _sim_input('New cards/day', 'sim-new', 0, min=0, max=500, step=1),
+                _sim_input('Max reviews/day', 'sim-maxrev', 200, min=10, max=9999, step=10),
+                html.Button('Simulate', id='sim-run', n_clicks=0, className='sim-run-btn'),
+            ], className='sim-controls'),
+        ], className='sim-header'),
+        dcc.Loading(
+            type='default', color=COLORS['primary'],
+            children=html.Div([
+                html.Div(
+                    dcc.Graph(id='chart-sim-memorized', config={'displayModeBar': False},
+                              figure=create_sim_memorized_chart(None),
+                              style={'height': CHART_HEIGHT, **DARK_BG}),
+                    className='chart-panel', style={'flex': 2, 'minWidth': 0},
+                ),
+                html.Div(
+                    dcc.Graph(id='chart-sim-reviews', config={'displayModeBar': False},
+                              figure=create_sim_reviews_chart(None),
+                              style={'height': CHART_HEIGHT, **DARK_BG}),
+                    className='chart-panel', style={'flex': 1, 'minWidth': 0},
+                ),
+            ], className='sim-charts'),
+        ),
+    ], className='sim-section')
+
 
 def create_stat_item(value, label, color=COLORS['text_primary'], secondary=False):
     """Create a compact stat indicator for the stat strip."""
@@ -260,6 +311,9 @@ def create_main_layout():
                 draggableChildStyle={'height': '100%', 'padding': 0, 'overflow': 'hidden'},
                 style={'minHeight': '400px'},
             ),
+
+            # ── Forecast Simulator ──
+            create_simulator_section(),
 
         ], className='dashboard'),
     ])

@@ -253,6 +253,76 @@ def create_cohort_chart(df):
     return fig
 
 
+def create_sim_memorized_chart(df):
+    """
+    Projected memorized cards (Σ retrievability) over the simulation horizon.
+    Input from fsrs_engine.simulate_future.
+    """
+    if df is None or df.empty:
+        return _sim_placeholder('Memorized (projected)')
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df['date'], y=df['memorized'],
+        mode='lines',
+        line=dict(color=COLORS['primary'], width=2),
+        fill='tozeroy', fillcolor='rgba(91, 141, 255, 0.12)',
+        hovertemplate='%{x|%b %d, %Y}<br>Memorized: %{y:.0f} cards<extra></extra>',
+        showlegend=False,
+    ))
+    end = df['memorized'].iloc[-1]
+    fig.add_annotation(
+        x=df['date'].iloc[-1], y=end, text=f'{end:.0f}',
+        showarrow=False, xanchor='right', yanchor='bottom',
+        font=dict(color=COLORS['primary'], size=11),
+    )
+    fig.update_layout(title='Memorized (projected)', yaxis_title='Cards',
+                      **DARK_CHART_LAYOUT)
+    fig.update_xaxes(**DARK_CHART_AXIS)
+    fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
+    return fig
+
+
+def create_sim_reviews_chart(df):
+    """
+    Projected reviews per day over the simulation horizon, with a 7-day
+    mean. Input from fsrs_engine.simulate_future.
+    """
+    if df is None or df.empty:
+        return _sim_placeholder('Reviews / day (projected)')
+
+    ma = df['reviews_per_day'].rolling(7, min_periods=1).mean()
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df['date'], y=df['reviews_per_day'],
+        marker=dict(color=COLORS['warning'], opacity=0.35),
+        name='Daily', hovertemplate='%{x|%b %d}<br>Reviews: %{y:.0f}<extra></extra>',
+    ))
+    fig.add_trace(go.Scatter(
+        x=df['date'], y=ma, mode='lines',
+        line=dict(color=COLORS['warning'], width=2), name='7-day avg',
+        hovertemplate='7-day avg: %{y:.0f}<extra></extra>',
+    ))
+    fig.update_layout(title='Reviews / day (projected)', yaxis_title='Reviews',
+                      hovermode='x unified', **DARK_CHART_LAYOUT)
+    fig.update_xaxes(**DARK_CHART_AXIS)
+    fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
+    return fig
+
+
+def _sim_placeholder(title):
+    """Empty-state figure prompting the user to run a simulation."""
+    fig = go.Figure()
+    fig.update_layout(
+        title=title, **DARK_CHART_LAYOUT,
+        annotations=[dict(text='Press Simulate to project', xref='paper', yref='paper',
+                          x=0.5, y=0.5, showarrow=False,
+                          font=dict(size=13, color='#5a5e72'))])
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False)
+    return fig
+
+
 def create_fatigue_chart(df):
     """
     Accuracy vs position within a study session, with Wilson 95% CI band.

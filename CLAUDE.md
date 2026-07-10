@@ -123,6 +123,14 @@ Deck→preset mapping comes from the `decks.kind` protobuf (field 1.1 = config i
   > 30d vs card age (state occupancy, right-censored)
 - `get_fatigue_curve` – accuracy/answer-time vs within-session position
   (sessions split on >30 min gaps)
+- `simulate_future` – Monte-Carlo forward FSRS simulation (Anki's FSRS
+  Simulator). Seeds current card states, rolls the py-fsrs scheduler
+  day-by-day with Anki's default rating distributions; returns per-day
+  memorized (Σ retrievability) and reviews. No off-the-shelf simulator
+  fit: py-fsrs has none (only a private torch-gated cost sim in
+  Optimizer); fsrs-rs-python's simulate() is fresh-deck only (can't seed
+  the current collection); fsrs-optimizer drags in torch. Powers the
+  Forecast Simulator section (controls + 2 charts, below the grid).
 
 FSRS-6 forgetting curve used throughout: `R(t) = (1 + factor·t/S)^decay`,
 `decay = −w20`, `factor = 0.9^(1/decay) − 1`.

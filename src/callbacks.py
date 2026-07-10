@@ -26,6 +26,8 @@ from .charts_card import (
     create_retention_workload_chart,
     create_cohort_chart,
     create_fatigue_chart,
+    create_sim_memorized_chart,
+    create_sim_reviews_chart,
     create_retrievability_distribution_chart,
     create_stability_distribution_chart,
     create_difficulty_distribution_chart,
@@ -50,6 +52,7 @@ from .fsrs_engine import (
     get_retention_workload_curve,
     get_cohort_maturity_curves,
     get_fatigue_curve,
+    simulate_future,
 )
 
 
@@ -494,6 +497,36 @@ def auto_dismiss_upload_message(n):
     if not n:
         return no_update, no_update
     return {'display': 'none'}, True
+
+
+# ---------------------------------------------------------------------------
+# Callback: Forecast simulator
+# ---------------------------------------------------------------------------
+
+@callback(
+    [Output('chart-sim-memorized', 'figure'),
+     Output('chart-sim-reviews', 'figure')],
+    [Input('sim-run', 'n_clicks')],
+    [State('sim-days', 'value'),
+     State('sim-retention', 'value'),
+     State('sim-new', 'value'),
+     State('sim-maxrev', 'value'),
+     State('deck-filter', 'value')],
+    prevent_initial_call=True,
+)
+def run_forecast_simulation(_n, days, retention, new_per_day, max_reviews, deck_value):
+    """Run the FSRS forward simulation and render the projection charts."""
+    deck_id = None if deck_value == 'all' else int(deck_value)
+    days = int(days or 365)
+    retention = min(max(float(retention or 90) / 100.0, 0.70), 0.97)
+    new_per_day = max(int(new_per_day or 0), 0)
+    max_reviews = max(int(max_reviews or 200), 1)
+
+    sim = simulate_future(
+        deck_id=deck_id, days=days, desired_retention=retention,
+        new_per_day=new_per_day, max_reviews=max_reviews, n_runs=2,
+    )
+    return create_sim_memorized_chart(sim), create_sim_reviews_chart(sim)
 
 
 # ---------------------------------------------------------------------------
