@@ -24,21 +24,21 @@ _GRID_CONSTRAINTS = {'minW': 1, 'maxW': GRID_COLS, 'minH': 1, 'maxH': 1}
 # the component matches itemLayout entries against child keys, which Dash
 # derives from the wrapper's id. The dcc.Graph inside keeps the bare chart id.
 DEFAULT_GRID_LAYOUT = [
-    {'i': 'w-chart-daily-reviews',       'x': 0, 'y': 0, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-hourly',              'x': 2, 'y': 0, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-recall-rate',         'x': 0, 'y': 1, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-review-speed',        'x': 2, 'y': 1, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-known-words',         'x': 0, 'y': 2, 'w': 3, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-future-load',         'x': 0, 'y': 3, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-calibration',         'x': 2, 'y': 3, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-retrievability-dist', 'x': 0, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-stability-dist',      'x': 1, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-difficulty-dist',     'x': 2, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-retention-workload',  'x': 0, 'y': 5, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-lapse-load',          'x': 1, 'y': 5, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-load-intro',          'x': 0, 'y': 6, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-fatigue',             'x': 2, 'y': 6, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-load-trend',          'x': 0, 'y': 7, 'w': 3, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-future-load',         'x': 0, 'y': 0, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-stability-dist',      'x': 2, 'y': 0, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-daily-reviews',       'x': 0, 'y': 1, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-retrievability-dist', 'x': 2, 'y': 1, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-recall-rate',         'x': 0, 'y': 2, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-difficulty-dist',     'x': 2, 'y': 2, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-review-speed',        'x': 0, 'y': 3, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-hourly',              'x': 2, 'y': 3, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-fatigue',             'x': 0, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-load-intro',          'x': 1, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-lapse-load',          'x': 2, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-known-words',         'x': 0, 'y': 5, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-retention-workload',  'x': 2, 'y': 5, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-load-trend',          'x': 0, 'y': 6, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-calibration',         'x': 0, 'y': 7, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
 ]
 
 
