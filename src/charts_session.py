@@ -280,16 +280,20 @@ def create_efficiency_chart(df, use_sessions=False):
 
     df_sorted = df.sort_values('date').reset_index(drop=True)
 
+    # Seconds per card (inverse of the cards/min rate)
+    sec_per_card = 60.0 / df_sorted['cards_per_minute'].where(
+        df_sorted['cards_per_minute'] > 0)
+
     if use_sessions:
         x_values = df_sorted.index
         x_range = [-0.5, len(df_sorted) - 0.5]
-        hover_template = 'Session %{x}<br>%{customdata|%b %d, %Y}<br>Speed: %{y:.1f} cards/min<extra></extra>'
+        hover_template = 'Session %{x}<br>%{customdata|%b %d, %Y}<br>Speed: %{y:.1f} sec/card<extra></extra>'
         custom_data = df_sorted['date']
         x_title = 'Session Number'
     else:
         x_values = df_sorted['date']
         x_range = [df_sorted['date'].min(), df_sorted['date'].max()]
-        hover_template = '%{x|%b %d, %Y}<br>Speed: %{y:.1f} cards/min<extra></extra>'
+        hover_template = '%{x|%b %d, %Y}<br>Speed: %{y:.1f} sec/card<extra></extra>'
         custom_data = None
         x_title = 'Date'
 
@@ -297,7 +301,7 @@ def create_efficiency_chart(df, use_sessions=False):
 
     fig.add_trace(go.Scatter(
         x=x_values,
-        y=df_sorted['cards_per_minute'],
+        y=sec_per_card,
         mode='markers',
         name='Session',
         marker=dict(
@@ -311,14 +315,14 @@ def create_efficiency_chart(df, use_sessions=False):
     ))
 
     y_range = _add_trend_with_ci(
-        fig, x_values, df_sorted['cards_per_minute'].values,
+        fig, x_values, sec_per_card.values,
         COLORS['secondary'], custom_data, 'Trend', y_min=0
     )
 
     fig.update_layout(
         title='Review Speed',
         xaxis_title=x_title,
-        yaxis_title='Cards/min',
+        yaxis_title='Sec/card',
         **DARK_CHART_LAYOUT,
     )
     fig.update_xaxes(range=x_range, **DARK_CHART_AXIS)
@@ -332,43 +336,94 @@ def create_efficiency_chart(df, use_sessions=False):
 
 
 def create_future_load_chart(df, days_ahead=60):
-    """Create future review load forecast chart."""
+    """
+    Upcoming review load as a GitHub-style calendar heatmap (weekday rows ×
+    week columns) with a 7-day-average trend line above, sharing the same
+    week-based x-axis so peaks line up with their columns.
+    """
     if df.empty:
         return go.Figure()
 
-    from datetime import timedelta
-    x_start = df['date'].min()
-    x_end = x_start + timedelta(days=60)
+    d = df.copy()
+    d['date'] = pd.to_datetime(d['date'])
+    first = d['date'].min()
+    week_start = first - pd.Timedelta(days=int(first.weekday()))  # Monday
+    offset = (d['date'] - week_start).dt.days
+    d['week'] = (offset // 7).astype(int)
+    d['wd'] = (offset % 7).astype(int)
+    n_weeks = int(d['week'].max()) + 1
 
-    fig = go.Figure()
+    # Calendar matrix (weekday × week); NaN = day outside the forecast window
+    z = np.full((7, n_weeks), np.nan)
+    date_txt = np.empty((7, n_weeks), dtype=object)
+    for _, r in d.iterrows():
+        z[r['wd'], r['week']] = r['due_count']
+        date_txt[r['wd'], r['week']] = r['date'].strftime('%a %b %d')
 
-    # Cumulative count lives in the hover, not on a second axis
-    fig.add_trace(go.Bar(
-        x=df['date'],
-        y=df['due_count'],
-        name='Due',
-        marker=dict(color=COLORS['primary'], opacity=0.7),
-        customdata=df['due_count'].cumsum(),
-        hovertemplate='Due: %{y} cards (cumulative: %{customdata:,})<extra></extra>',
-    ))
+    week_centers = [w + 0.5 for w in range(n_weeks)]
+    blue_scale = [
+        [0.0, '#1a2030'], [0.12, '#20365f'], [0.35, '#2f5db0'],
+        [0.65, '#4f86e8'], [1.0, '#9cc0ff'],
+    ]
 
+    fig = make_subplots(
+        rows=2, cols=1, shared_xaxes=True,
+        row_heights=[0.5, 0.5], vertical_spacing=0.05,
+    )
+
+    # Trend line (7-day average), positioned on the shared week axis
     fig.add_trace(go.Scatter(
-        x=df['date'],
-        y=df['ma7'],
+        x=(offset + 0.5) / 7.0,
+        y=d['ma7'],
         mode='lines',
         name='7-day avg',
-        line=dict(color=COLORS['warning'], width=2),
-        hovertemplate='7-day avg: %{y:.0f}<extra></extra>',
-    ))
+        line=dict(color=COLORS['warning'], width=2, shape='spline'),
+        fill='tozeroy', fillcolor='rgba(240, 180, 41, 0.10)',
+        customdata=d['due_count'],
+        hovertemplate='7-day avg: %{y:.0f} · that day: %{customdata}<extra></extra>',
+    ), row=1, col=1)
 
-    fig.update_layout(
-        title='Upcoming Reviews',
-        xaxis_title='Date',
-        yaxis_title='Cards Due',
-        hovermode='x unified',
-        **DARK_CHART_LAYOUT,
+    # Calendar heatmap
+    fig.add_trace(go.Heatmap(
+        x=week_centers, y=list(range(7)), z=z,
+        customdata=date_txt,
+        colorscale=blue_scale, zmin=0,
+        xgap=3, ygap=3, showscale=False, hoverongaps=False,
+        hovertemplate='%{customdata}: %{z:.0f} due<extra></extra>',
+    ), row=2, col=1)
+
+    # Month labels along the bottom axis
+    tickvals, ticktext, last_month = [], [], None
+    for w in range(n_weeks):
+        wk_date = week_start + pd.Timedelta(weeks=w)
+        if wk_date.month != last_month:
+            tickvals.append(w + 0.5)
+            ticktext.append(wk_date.strftime('%b'))
+            last_month = wk_date.month
+
+    layout = dict(DARK_CHART_LAYOUT)
+    layout['margin'] = dict(l=44, r=16, t=36, b=22)
+    layout['showlegend'] = False
+    fig.update_layout(title='Upcoming Reviews', hovermode='closest', **layout)
+
+    # Trend row
+    fig.update_yaxes(title_text='Due/day', rangemode='tozero',
+                     row=1, col=1, **DARK_CHART_AXIS)
+    fig.update_xaxes(range=[0, n_weeks], showticklabels=False,
+                     showgrid=False, zeroline=False, row=1, col=1)
+
+    # Calendar row (Mon at top, month ticks below)
+    fig.update_yaxes(
+        row=2, col=1, autorange='reversed',
+        tickvals=[0, 2, 4, 6], ticktext=['Mon', 'Wed', 'Fri', 'Sun'],
+        showgrid=False, zeroline=False,
+        tickfont=dict(color='#5a5e72', size=10),
     )
-    fig.update_xaxes(range=[x_start, x_end], **DARK_CHART_AXIS)
-    fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
+    fig.update_xaxes(
+        row=2, col=1, range=[0, n_weeks],
+        tickvals=tickvals, ticktext=ticktext,
+        showgrid=False, zeroline=False,
+        tickfont=dict(color='#5a5e72', size=10),
+    )
 
     return fig

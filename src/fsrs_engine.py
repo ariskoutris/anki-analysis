@@ -455,44 +455,6 @@ def get_retention_workload_curve(deck_id: int | None = None) -> dict:
     return {'curve': curve, 'current_retention': current_retention, 'n_cards': len(s_arr)}
 
 
-def get_completion_projection(deck_id: int | None = None) -> dict:
-    """
-    Historical cumulative card introductions + remaining new cards, for
-    projecting deck completion at candidate new-card paces.
-
-    Returns {'intro_curve': DataFrame[date, cum_introduced],
-             'introduced': int, 'remaining_new': int}
-    """
-    df = replay_reviews(deck_id)
-    seen = set(df['cid'].unique()) if not df.empty else set()
-
-    conn = connect_db()
-    deck_filter = f'AND c.did = {int(deck_id)}' if deck_id is not None else ''
-    new_ids = [r[0] for r in conn.execute(
-        f"SELECT c.id FROM cards c WHERE c.queue = 0 {deck_filter}").fetchall()]
-    conn.close()
-    # Exclude cards already counted as introduced (a reviewed card can be
-    # reset back to the new queue, which would otherwise double-count it).
-    remaining_new = sum(1 for cid in new_ids if cid not in seen)
-
-    if df.empty:
-        return {'intro_curve': pd.DataFrame(columns=['date', 'cum_introduced']),
-                'introduced': 0, 'remaining_new': remaining_new}
-
-    first_seen = df.groupby('cid')['ts'].min()
-    intro_dates = pd.to_datetime(first_seen, unit='s').dt.normalize()
-    daily = intro_dates.value_counts().sort_index()
-    full_range = pd.date_range(daily.index.min(), pd.Timestamp(datetime.now().date()), freq='D')
-    cum = daily.reindex(full_range, fill_value=0).cumsum()
-
-    intro_curve = pd.DataFrame({'date': cum.index, 'cum_introduced': cum.to_numpy()})
-    return {
-        'intro_curve': intro_curve,
-        'introduced': int(len(first_seen)),
-        'remaining_new': int(remaining_new),
-    }
-
-
 # =============================================================================
 # FORWARD SIMULATION (FSRS simulator)
 # =============================================================================
@@ -759,10 +721,12 @@ def get_fatigue_curve(
         successes=('recalled', 'sum'),
         n=('recalled', 'size'),
         avg_time_s=('time_ms', lambda t: t.mean() / 1000.0),
+        time_std_s=('time_ms', lambda t: t.std() / 1000.0),
     ).reset_index()
     grouped = grouped[grouped['n'] >= min_bin_n].copy()
     if grouped.empty:
-        return pd.DataFrame(columns=['position', 'success_rate', 'ci_low', 'ci_high', 'avg_time_s', 'n'])
+        return pd.DataFrame(columns=['position', 'success_rate', 'ci_low', 'ci_high',
+                                     'avg_time_s', 'time_ci_low', 'time_ci_high', 'n'])
 
     grouped['position'] = grouped['bin'] * bin_size + bin_size / 2
     grouped['success_rate'] = grouped['successes'] / grouped['n'] * 100
@@ -771,7 +735,13 @@ def get_fatigue_curve(
     grouped['ci_low'] = ci_low * 100
     grouped['ci_high'] = ci_high * 100
 
-    return grouped[['position', 'success_rate', 'ci_low', 'ci_high', 'avg_time_s', 'n']]
+    # 95% CI for the mean answer time (normal approx; bins are large)
+    sem = grouped['time_std_s'] / np.sqrt(grouped['n'])
+    grouped['time_ci_low'] = (grouped['avg_time_s'] - 1.96 * sem).clip(lower=0)
+    grouped['time_ci_high'] = grouped['avg_time_s'] + 1.96 * sem
+
+    return grouped[['position', 'success_rate', 'ci_low', 'ci_high',
+                    'avg_time_s', 'time_ci_low', 'time_ci_high', 'n']]
 
 
 # =============================================================================

@@ -10,6 +10,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from .constants import COLORS, DARK_CHART_LAYOUT, DARK_CHART_AXIS
+from .charts_session import get_time_period_markers, add_session_time_markers
 
 
 def create_known_words_chart(df):
@@ -45,7 +46,7 @@ def create_known_words_chart(df):
     ))
 
     fig.update_layout(
-        title='Known Cards (Σ Retrievability)',
+        title='Known Cards',
         yaxis_title='Cards',
         hovermode='x unified',
         **DARK_CHART_LAYOUT,
@@ -53,6 +54,162 @@ def create_known_words_chart(df):
     fig.update_xaxes(**DARK_CHART_AXIS)
     fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
 
+    return fig
+
+
+def create_load_timeseries_chart(df, use_sessions=False, session_dates=None):
+    """
+    Historical daily load (Σ 1/interval ≈ reviews/day) over time.
+    Input: DataFrame[date, load] from data_loader.get_load_timeseries.
+    In session mode the series is compressed to study-session days and the
+    x-axis becomes a sequential session number.
+    """
+    if df.empty:
+        return go.Figure()
+
+    fig = go.Figure()
+    line = dict(color=COLORS['warning'], width=2)
+    fill = 'rgba(240, 180, 41, 0.12)'
+
+    if use_sessions and session_dates is not None and len(session_dates):
+        d = df[df['date'].isin(pd.DatetimeIndex(session_dates))].reset_index(drop=True)
+        if d.empty:
+            d = df.reset_index(drop=True)
+        fig.add_trace(go.Scatter(
+            x=d.index, y=d['load'], mode='lines', line=line,
+            fill='tozeroy', fillcolor=fill, customdata=d['date'],
+            hovertemplate=('Session %{x}<br>%{customdata|%b %d, %Y}'
+                           '<br>Load: %{y:.1f} reviews/day<extra></extra>'),
+        ))
+        x_title = 'Session Number'
+    else:
+        d = df
+        fig.add_trace(go.Scatter(
+            x=d['date'], y=d['load'], mode='lines', line=line,
+            fill='tozeroy', fillcolor=fill,
+            hovertemplate='%{x|%b %d, %Y}<br>Load: %{y:.1f} reviews/day<extra></extra>',
+        ))
+        x_title = None
+
+    fig.update_layout(
+        title='Load Trend',
+        xaxis_title=x_title,
+        yaxis_title='Daily load',
+        hovermode='x unified',
+        **DARK_CHART_LAYOUT,
+    )
+    fig.update_xaxes(**DARK_CHART_AXIS)
+    fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
+
+    if use_sessions and session_dates is not None and len(session_dates):
+        fig = add_session_time_markers(fig, get_time_period_markers(d, 'date'))
+    return fig
+
+
+def create_load_by_introduction_chart(df, use_sessions=False, session_dates=None):
+    """
+    Current review load grouped by when each card was introduced. In date
+    mode bars are monthly (quarterly if the span exceeds ~3 years); in
+    session mode cards are bucketed into equal-width session-number ranges.
+    Input: DataFrame[intro_date, contrib] from get_load_by_introduction.
+    """
+    if df is None or df.empty:
+        return go.Figure()
+
+    marker = dict(color=COLORS['primary'], cornerradius=3)
+    fig = go.Figure()
+
+    if use_sessions and session_dates is not None and len(session_dates):
+        sess = pd.DatetimeIndex(pd.Series(session_dates).sort_values())
+        idx = np.clip(np.searchsorted(sess.values, df['intro_date'].values,
+                                      side='right') - 1, 0, len(sess) - 1)
+        # ~20 bars: round bucket width to a tidy number of sessions
+        raw = max(1, len(sess) / 20)
+        step = max(1, int(round(raw / 5.0) * 5) or 5)
+        bucket = (idx // step) * step
+        g = pd.DataFrame({'bucket': bucket, 'contrib': df['contrib'].to_numpy()})
+        grouped = g.groupby('bucket').agg(
+            load=('contrib', 'sum'), n=('contrib', 'size')).reset_index()
+        fig.add_trace(go.Bar(
+            x=grouped['bucket'] + step / 2.0, y=grouped['load'],
+            width=step * 0.9, marker=marker,
+            customdata=np.column_stack([grouped['n'], grouped['bucket'],
+                                        grouped['bucket'] + step]),
+            hovertemplate=('Sessions %{customdata[1]}–%{customdata[2]}'
+                           '<br>Load: %{y:.2f}/day<br>Cards: %{customdata[0]}'
+                           '<extra></extra>'),
+        ))
+        x_title = 'Session Number'
+    else:
+        intro = df['intro_date']
+        span_days = (intro.max() - intro.min()).days
+        freq = 'Q' if span_days > 1100 else 'M'
+        period = intro.dt.to_period(freq).dt.start_time
+        g = pd.DataFrame({'period': period, 'contrib': df['contrib'].to_numpy()})
+        grouped = g.groupby('period').agg(
+            load=('contrib', 'sum'), n=('contrib', 'size')).reset_index()
+        grouped = grouped.sort_values('period')
+        day_ms = 24 * 3600 * 1000
+        width = (75 if freq == 'Q' else 24) * day_ms
+        fig.add_trace(go.Bar(
+            x=grouped['period'], y=grouped['load'], width=width, marker=marker,
+            customdata=grouped['n'],
+            hovertemplate=('%{x|%b %Y}<br>Load: %{y:.2f}/day'
+                           '<br>Cards: %{customdata}<extra></extra>'),
+        ))
+        x_title = None
+
+    fig.update_layout(
+        title='Load by Introduction',
+        xaxis_title=x_title,
+        yaxis_title='Current daily load',
+        **DARK_CHART_LAYOUT,
+    )
+    fig.update_xaxes(**DARK_CHART_AXIS)
+    fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
+    return fig
+
+
+def create_lapse_load_chart(df):
+    """
+    Daily load (Σ 1/interval) grouped by lapse count, with card count on a
+    secondary axis. Input: DataFrame from data_loader.get_lapse_load.
+    """
+    if df is None or df.empty:
+        return go.Figure()
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=df['lapses'], y=df['load'],
+        name='Load',
+        marker=dict(color=COLORS['primary'], cornerradius=3),
+        customdata=df['cards'],
+        hovertemplate=('%{x} lapses<br>Load: %{y:.2f}/day'
+                       '<br>Cards: %{customdata}<extra></extra>'),
+    ))
+    fig.add_trace(go.Scatter(
+        x=df['lapses'], y=df['cards'],
+        name='Cards',
+        mode='lines+markers',
+        line=dict(color=COLORS['text_secondary'], width=2, dash='dot'),
+        marker=dict(size=5),
+        yaxis='y2',
+        hovertemplate='%{x} lapses<br>Cards: %{y}<extra></extra>',
+    ))
+    fig.update_layout(
+        title='Lapse Load',
+        xaxis_title='Lapses',
+        yaxis_title='Daily load (reviews/day)',
+        yaxis2=dict(
+            title=dict(text='Cards', font=dict(color='#8b8fa3', size=11)),
+            overlaying='y', side='right',
+            tickmode='sync', showgrid=False, zeroline=False,
+            rangemode='tozero', tickfont=dict(color='#5a5e72', size=10),
+        ),
+        **DARK_CHART_LAYOUT,
+    )
+    fig.update_xaxes(rangemode='tozero', **DARK_CHART_AXIS)
+    fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
     return fig
 
 
@@ -98,102 +255,10 @@ def create_retention_workload_chart(data):
     fig.update_layout(
         title='Retention ⇄ Workload Tradeoff',
         xaxis_title='Desired retention',
-        yaxis_title='Equilibrium reviews/day',
+        yaxis_title='Daily load (reviews/day)',
         **DARK_CHART_LAYOUT,
     )
     fig.update_xaxes(tickformat='.0%', **DARK_CHART_AXIS)
-    fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
-
-    return fig
-
-
-def create_completion_chart(data, default_pace=10, max_pace=30, horizon_days=3 * 365):
-    """
-    Cumulative cards introduced + projected deck completion, with a
-    client-side pace slider (new cards/day) that redraws the projection.
-    Input from fsrs_engine.get_completion_projection.
-    """
-    curve = data['intro_curve']
-    if curve.empty:
-        return go.Figure()
-
-    introduced = data['introduced']
-    remaining = data['remaining_new']
-    total = introduced + remaining
-    today = curve['date'].iloc[-1]
-    horizon = today + pd.Timedelta(days=horizon_days)
-
-    def projection(pace):
-        """(x, y, label) for one pace scenario."""
-        days_needed = remaining / pace
-        end = today + pd.Timedelta(days=days_needed)
-        if days_needed <= horizon_days:
-            label = f"{pace}/day → {end.strftime('%b %Y')}"
-        else:
-            label = f"{pace}/day → {end.strftime('%Y')}"
-        return [today, end], [introduced, total], label
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=curve['date'],
-        y=curve['cum_introduced'],
-        name='Introduced',
-        mode='lines',
-        line=dict(color=COLORS['primary'], width=2),
-        fill='tozeroy',
-        fillcolor='rgba(91, 141, 255, 0.12)',
-        hovertemplate='%{x|%b %Y}: %{y} cards<extra></extra>',
-    ))
-
-    # Deck size target
-    fig.add_hline(y=total, line=dict(color=COLORS['text_muted'], width=1, dash='dash'),
-                  annotation_text=f'deck: {total:,}',
-                  annotation_font=dict(color='#8b8fa3', size=10))
-
-    sliders = []
-    if remaining > 0:
-        x0, y0, label0 = projection(default_pace)
-        fig.add_trace(go.Scatter(
-            x=x0, y=y0,
-            name=label0,
-            mode='lines',
-            line=dict(color=COLORS['success'], width=2, dash='dot'),
-            hovertemplate='%{x|%b %Y}: %{y:.0f} cards<extra></extra>',
-        ))
-
-        steps = []
-        for pace in range(1, max_pace + 1):
-            x, y, label = projection(pace)
-            steps.append(dict(
-                method='restyle',
-                label=str(pace),
-                args=[{'x': [x], 'y': [y], 'name': [label]}, [1]],
-            ))
-        sliders = [dict(
-            active=default_pace - 1,
-            steps=steps,
-            currentvalue=dict(prefix='New cards/day: ',
-                              font=dict(color='#e0e0e0', size=11)),
-            pad=dict(t=28, b=4),
-            len=0.9, x=0.05,
-            bgcolor='#2a2d3a',
-            activebgcolor='#5b8dff',
-            bordercolor='#2a2d3a',
-            tickcolor='#5a5e72',
-            font=dict(color='#5a5e72', size=8),
-        )]
-
-    layout = dict(DARK_CHART_LAYOUT)
-    layout['margin'] = dict(l=40, r=32, t=36, b=8)
-    fig.update_layout(
-        title='Deck Completion Projection',
-        yaxis_title='Cards',
-        sliders=sliders,
-        **layout,
-    )
-    # Fixed x-range so the slider doesn't rescale the axis on every step
-    fig.update_xaxes(range=[curve['date'].iloc[0], horizon], **DARK_CHART_AXIS)
     fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
 
     return fig
@@ -348,19 +413,50 @@ def create_fatigue_chart(df):
         x=df['position'],
         y=df['success_rate'],
         mode='lines+markers',
+        name='Success rate',
         line=dict(color=COLORS['info'], width=2),
         marker=dict(size=6),
-        customdata=df[['avg_time_s', 'n']],
-        hovertemplate=('Cards %{x:.0f}±5 into session<br>Accuracy: %{y:.1f}%'
-                       '<br>Avg answer time: %{customdata[0]:.1f}s'
-                       '<br>Reviews: %{customdata[1]}<extra></extra>'),
+        customdata=df['n'],
+        hovertemplate=('Cards %{x:.0f}±5 into session<br>Success rate: %{y:.1f}%'
+                       '<br>Reviews: %{customdata}<extra></extra>'),
+        showlegend=True,
+    ))
+
+    # Answer time on a secondary axis, with its own CI band
+    fig.add_trace(go.Scatter(
+        x=pd.concat([df['position'], df['position'][::-1]]),
+        y=pd.concat([df['time_ci_high'], df['time_ci_low'][::-1]]),
+        fill='toself',
+        fillcolor='rgba(240, 180, 41, 0.12)',
+        line=dict(width=0),
+        yaxis='y2',
+        hoverinfo='skip',
         showlegend=False,
+    ))
+    fig.add_trace(go.Scatter(
+        x=df['position'],
+        y=df['avg_time_s'],
+        mode='lines+markers',
+        name='Answer time',
+        line=dict(color=COLORS['warning'], width=2, dash='dot'),
+        marker=dict(size=5),
+        yaxis='y2',
+        hovertemplate='Avg answer time: %{y:.1f}s<extra></extra>',
+        showlegend=True,
     ))
 
     fig.update_layout(
-        title='Within-Session Fatigue',
-        xaxis_title='Position in session',
-        yaxis_title='Accuracy (%)',
+        title='Session Fatigue',
+        xaxis_title='Card Position',
+        yaxis_title='Success Rate (%)',
+        yaxis2=dict(
+            title=dict(text='Answer time (s)', font=dict(color='#8b8fa3', size=11)),
+            overlaying='y', side='right',
+            tickmode='sync',  # share gridlines with the left axis
+            showgrid=False, zeroline=False,
+            rangemode='tozero',
+            tickfont=dict(color='#5a5e72', size=10),
+        ),
         **DARK_CHART_LAYOUT,
     )
     fig.update_xaxes(rangemode='tozero', **DARK_CHART_AXIS)
@@ -391,6 +487,22 @@ def create_calibration_chart(df, summary=None):
         showlegend=False,
     ))
 
+    # Calibration gap: shade between the observed curve and the diagonal.
+    # First the diagonal evaluated at each point's predicted value (hidden),
+    # then the observed curve filling down/up to it.
+    d = df.sort_values('predicted')
+    fig.add_trace(go.Scatter(
+        x=d['predicted'], y=d['predicted'],
+        mode='lines', line=dict(width=0),
+        hoverinfo='skip', showlegend=False,
+    ))
+    fig.add_trace(go.Scatter(
+        x=d['predicted'], y=d['observed'],
+        mode='lines', line=dict(color=COLORS['secondary'], width=2),
+        fill='tonexty', fillcolor='rgba(176, 122, 255, 0.18)',
+        hoverinfo='skip', showlegend=False,
+    ))
+
     fig.add_trace(go.Scatter(
         x=df['predicted'],
         y=df['observed'],
@@ -408,21 +520,10 @@ def create_calibration_chart(df, summary=None):
         showlegend=False,
     ))
 
-    annotations = []
-    if summary and summary.get('n'):
-        gap = summary['gap_pp']
-        direction = 'underestimates' if gap > 0 else 'overestimates'
-        annotations.append(dict(
-            text=f"FSRS {direction} your recall by {abs(gap):.1f} pp (n={summary['n']:,})",
-            xref='paper', yref='paper', x=0.02, y=0.98,
-            showarrow=False, font=dict(color='#8b8fa3', size=10),
-        ))
-
     fig.update_layout(
         title='FSRS Calibration',
         xaxis_title='Predicted retrievability',
         yaxis_title='Observed recall',
-        annotations=annotations,
         **DARK_CHART_LAYOUT,
     )
     fig.update_xaxes(tickformat='.0%', **DARK_CHART_AXIS)
@@ -487,7 +588,7 @@ def create_stability_distribution_chart(df):
 
     fig = _histogram_bar_figure(
         log_vals, edges, COLORS['success'],
-        'Stability Distribution', 'Stability (days, log)',
+        'Stability Distribution', 'Stability (days)',
         '%{customdata[2]:.0f}–%{customdata[3]:.0f}d: %{y} cards')
     # Hover needs day-denominated bin bounds alongside the log-space ones
     fig.data[0].customdata = np.column_stack([
@@ -516,7 +617,7 @@ def create_difficulty_distribution_chart(df):
 
     fig = _histogram_bar_figure(
         df['difficulty'], np.linspace(0, 10, 26), COLORS['info'],
-        'Difficulty Distribution', 'Difficulty (0-10)',
+        'Difficulty Distribution', 'Difficulty',
         '%{customdata[0]:.1f}–%{customdata[1]:.1f}: %{y} cards')
     _add_median_line(fig, df['difficulty'], '{:.1f}')
     return fig

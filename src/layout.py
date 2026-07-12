@@ -34,10 +34,11 @@ DEFAULT_GRID_LAYOUT = [
     {'i': 'w-chart-retrievability-dist', 'x': 0, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
     {'i': 'w-chart-stability-dist',      'x': 1, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
     {'i': 'w-chart-difficulty-dist',     'x': 2, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-completion',          'x': 0, 'y': 5, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-retention-workload',  'x': 2, 'y': 5, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-cohorts',             'x': 0, 'y': 6, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-retention-workload',  'x': 0, 'y': 5, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-lapse-load',          'x': 1, 'y': 5, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-load-intro',          'x': 0, 'y': 6, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
     {'i': 'w-chart-fatigue',             'x': 2, 'y': 6, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-load-trend',          'x': 0, 'y': 7, 'w': 3, 'h': 1, **_GRID_CONSTRAINTS},
 ]
 
 
@@ -80,7 +81,7 @@ def _sim_input(label, input_id, value, suffix=None, **input_kwargs):
         html.Label(label, className='sim-input__label'),
         html.Div([
             dcc.Input(id=input_id, type='number', value=value,
-                      className='sim-input__field', debounce=True, **input_kwargs),
+                      className='sim-input__field', **input_kwargs),
             html.Span(suffix, className='sim-input__suffix') if suffix else None,
         ], className='sim-input__wrap'),
     ], className='sim-input')
@@ -141,6 +142,7 @@ def create_main_layout():
         dcc.Location(id='url', refresh=True),
         dcc.Store(id='backup-refresh-token', data=0, storage_type='memory'),
         dcc.Store(id='xaxis-mode', data='dates', storage_type='local'),
+        dcc.Store(id='load-basis', data='interval', storage_type='local'),
         dcc.Store(id='grid-layout-store', storage_type='local'),
         dcc.Store(id='grid-resize-sync', storage_type='memory'),
         dcc.Store(id='ui-store', storage_type='local', data={
@@ -213,6 +215,48 @@ def create_main_layout():
                             },
                         ),
                     ], style={'display': 'flex'}),
+
+                    html.Div(className='top-bar__separator'),
+
+                    # Load basis toggle (interval vs stability)
+                    html.Div([
+                        html.Span('Load', className='top-bar__label'),
+                        html.Div([
+                            html.Button(
+                                'Interval',
+                                id='load-interval-btn',
+                                n_clicks=0,
+                                style={
+                                    'padding': '4px 12px',
+                                    'border': f'1px solid {COLORS["primary"]}',
+                                    'borderRadius': '3px 0 0 3px',
+                                    'backgroundColor': COLORS['primary'],
+                                    'color': '#fff',
+                                    'cursor': 'pointer',
+                                    'fontSize': '12px',
+                                    'fontWeight': '500',
+                                    'lineHeight': '1.4',
+                                },
+                            ),
+                            html.Button(
+                                'Stability',
+                                id='load-stability-btn',
+                                n_clicks=0,
+                                style={
+                                    'padding': '4px 12px',
+                                    'border': f'1px solid {COLORS["border"]}',
+                                    'borderLeft': 'none',
+                                    'borderRadius': '0 3px 3px 0',
+                                    'backgroundColor': COLORS['bg_secondary'],
+                                    'color': COLORS['text_secondary'],
+                                    'cursor': 'pointer',
+                                    'fontSize': '12px',
+                                    'fontWeight': '500',
+                                    'lineHeight': '1.4',
+                                },
+                            ),
+                        ], style={'display': 'flex'}),
+                    ], className='top-bar__group'),
 
                     html.Div(className='top-bar__separator'),
 
@@ -294,6 +338,7 @@ def create_main_layout():
                 html.Div(id='stat-days-active'),
                 html.Div(id='stat-cards-learned'),
                 html.Div(id='stat-avg-retrievability'),
+                html.Div(id='stat-daily-load'),
             ], className='stat-strip'),
 
             # ── Chart Grid (draggable / resizable) ──

@@ -118,7 +118,6 @@ Deck→preset mapping comes from the `decks.kind` protobuf (field 1.1 = config i
   recall, equal-count bins, Wilson CIs; same-day reviews excluded
 - `get_retention_workload_curve` – desired retention sweep → equilibrium
   reviews/day via I(R_d,S) = S/factor · (R_d^(1/decay) − 1)
-- `get_completion_projection` – cumulative introductions + remaining new cards
 - `get_cohort_maturity_curves` – % of introduction-year cohort with stability
   > 30d vs card age (state occupancy, right-censored)
 - `get_fatigue_curve` – accuracy/answer-time vs within-session position

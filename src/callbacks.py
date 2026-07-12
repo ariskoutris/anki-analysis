@@ -6,6 +6,8 @@ All @callback decorators register against the global Dash app instance.
 import base64
 import os
 import time
+from datetime import datetime
+import pandas as pd
 from dash import dcc, html, Input, Output, State, callback, clientside_callback, ctx, no_update
 
 from .constants import COLORS
@@ -22,9 +24,10 @@ from .charts_session import (
 from .charts_card import (
     create_known_words_chart,
     create_calibration_chart,
-    create_completion_chart,
     create_retention_workload_chart,
-    create_cohort_chart,
+    create_load_timeseries_chart,
+    create_load_by_introduction_chart,
+    create_lapse_load_chart,
     create_fatigue_chart,
     create_sim_memorized_chart,
     create_sim_reviews_chart,
@@ -43,14 +46,17 @@ from .data_loader import (
     get_session_summary_stats,
     get_workload_summary,
     get_knowledge_health_stats,
+    calculate_daily_load,
+    get_load_timeseries,
+    get_load_by_introduction,
+    get_session_dates,
+    get_lapse_load,
 )
 from .fsrs_engine import (
     get_known_words_timeseries,
     get_calibration_data,
     get_calibration_summary,
-    get_completion_projection,
     get_retention_workload_curve,
-    get_cohort_maturity_curves,
     get_fatigue_curve,
     simulate_future,
     get_deck_sim_defaults,
@@ -124,15 +130,18 @@ _TOAST_WARN = {
         Output('stat-days-active', 'children'),
         Output('stat-cards-learned', 'children'),
         Output('stat-avg-retrievability', 'children'),
+        Output('stat-daily-load', 'children'),
     ],
     [Input('backup-refresh-token', 'data'),
      Input('url', 'pathname'),
-     Input('deck-filter', 'value')],
+     Input('deck-filter', 'value'),
+     Input('load-basis', 'data')],
     prevent_initial_call=False
 )
-def update_overview_container(_refresh_token, _url, deck_value):
+def update_overview_container(_refresh_token, _url, deck_value, load_basis):
     """Populate the stat strip with current metrics."""
     deck_id = None if deck_value == 'all' else int(deck_value)
+    use_stability = (load_basis == 'stability')
     stats = get_overview_stats(deck_id=deck_id)
     memory = get_memory_state_summary(deck_id=deck_id)
     workload = get_workload_summary(deck_id=deck_id)
@@ -164,8 +173,12 @@ def update_overview_container(_refresh_token, _url, deck_value):
         f"{memory['mean_retrievability']:.0f}%", 'Avg Ret.',
         COLORS['success'] if memory['mean_retrievability'] >= 80 else COLORS['warning'],
         secondary=True)
+    daily_load = create_stat_item(
+        f"{calculate_daily_load(deck_id=deck_id, use_stability=use_stability):.1f}",
+        'Daily Load', COLORS['text_secondary'], secondary=True)
 
-    return upcoming, streak, recall, overdue, total_reviews, total_hours, days_active, cards_learned, avg_ret
+    return (upcoming, streak, recall, overdue, total_reviews, total_hours,
+            days_active, cards_learned, avg_ret, daily_load)
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +384,44 @@ def toggle_xaxis_mode(dates_clicks, sessions_clicks, _, ui_store):
     return mode, dates_s, sessions_s
 
 
+@callback(
+    [Output('load-basis', 'data'),
+     Output('load-interval-btn', 'style'),
+     Output('load-stability-btn', 'style')],
+    [Input('load-interval-btn', 'n_clicks'),
+     Input('load-stability-btn', 'n_clicks'),
+     Input('url', 'pathname')],
+    [State('ui-store', 'data')],
+    prevent_initial_call=False
+)
+def toggle_load_basis(_interval_clicks, _stability_clicks, _, ui_store):
+    """Toggle load computations between stored intervals and stability."""
+    base = {'padding': '4px 12px', 'cursor': 'pointer', 'fontSize': '12px',
+            'fontWeight': '500', 'lineHeight': '1.4'}
+    active_style = {**base, 'border': f'1px solid {COLORS["primary"]}',
+                    'backgroundColor': COLORS['primary'], 'color': '#fff'}
+    inactive_style = {**base, 'border': f'1px solid {COLORS["border"]}',
+                      'backgroundColor': COLORS['bg_secondary'],
+                      'color': COLORS['text_secondary']}
+
+    triggered = ctx.triggered_id
+    if triggered == 'url' or not triggered:
+        basis = (ui_store or {}).get('load_basis', 'interval')
+    elif triggered == 'load-stability-btn':
+        basis = 'stability'
+    else:
+        basis = 'interval'
+
+    if basis == 'interval':
+        interval_s = {**active_style, 'borderRadius': '3px 0 0 3px'}
+        stability_s = {**inactive_style, 'borderRadius': '0 3px 3px 0', 'borderLeft': 'none'}
+    else:
+        interval_s = {**inactive_style, 'borderRadius': '3px 0 0 3px'}
+        stability_s = {**active_style, 'borderRadius': '0 3px 3px 0', 'borderLeft': 'none'}
+
+    return basis, interval_s, stability_s
+
+
 # ---------------------------------------------------------------------------
 # Callback: Save UI preferences
 # ---------------------------------------------------------------------------
@@ -380,16 +431,18 @@ def toggle_xaxis_mode(dates_clicks, sessions_clicks, _, ui_store):
     [
         Input('session-time-range', 'value'),
         Input('xaxis-mode', 'data'),
-        Input('deck-filter', 'value')
+        Input('deck-filter', 'value'),
+        Input('load-basis', 'data')
     ],
     prevent_initial_call=False
 )
-def save_ui_to_store(session_value, xaxis_value, deck_value):
+def save_ui_to_store(session_value, xaxis_value, deck_value, load_basis):
     """Persist UI preferences to local storage."""
     return {
         'session_time_range': session_value or 'all',
         'xaxis_mode': xaxis_value or 'dates',
         'deck_filter': deck_value or 'all',
+        'load_basis': load_basis or 'interval',
     }
 
 
@@ -610,19 +663,28 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value, ui
         Output('chart-retrievability-dist', 'figure'),
         Output('chart-stability-dist', 'figure'),
         Output('chart-difficulty-dist', 'figure'),
-        Output('chart-completion', 'figure'),
         Output('chart-retention-workload', 'figure'),
-        Output('chart-cohorts', 'figure'),
+        Output('chart-load-intro', 'figure'),
         Output('chart-fatigue', 'figure'),
+        Output('chart-load-trend', 'figure'),
+        Output('chart-lapse-load', 'figure'),
     ],
     [Input('backup-refresh-token', 'data'),
-     Input('deck-filter', 'value')],
+     Input('deck-filter', 'value'),
+     Input('session-time-range', 'value'),
+     Input('xaxis-mode', 'data'),
+     Input('load-basis', 'data')],
     [State('ui-store', 'data')],
     prevent_initial_call=False
 )
-def update_card_charts(_refresh_token, deck_value, ui_store):
-    """Update card charts based on filters."""
+def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode, load_basis, ui_store):
+    """Update card charts based on filters, date range and x-axis mode."""
     deck_id = None if deck_value == 'all' else int(deck_value)
+    use_sessions = (xaxis_mode == 'sessions')
+    use_stability = (load_basis == 'stability')
+    review_days, _ = parse_time_range(time_range)
+    cutoff = (None if review_days is None
+              else pd.Timestamp(datetime.now().date()) - pd.Timedelta(days=review_days))
     cards_df = get_card_data(deck_id=deck_id)
 
     import plotly.graph_objects as go
@@ -637,9 +699,16 @@ def update_card_charts(_refresh_token, deck_value, ui_store):
     )
 
     if cards_df.empty:
-        return (empty,) * 9
+        return (empty,) * 10
 
-    fig_known = create_known_words_chart(get_known_words_timeseries(deck_id=deck_id))
+    session_dates = get_session_dates(deck_id=deck_id)
+
+    # Known Cards: obey the date range only (no session mode)
+    known_df = get_known_words_timeseries(deck_id=deck_id)
+    if cutoff is not None:
+        known_df = known_df[known_df['date'] >= cutoff]
+    fig_known = create_known_words_chart(known_df)
+
     fig_calib = create_calibration_chart(
         get_calibration_data(deck_id=deck_id),
         summary=get_calibration_summary(deck_id=deck_id),
@@ -647,10 +716,27 @@ def update_card_charts(_refresh_token, deck_value, ui_store):
     fig_ret = create_retrievability_distribution_chart(cards_df)
     fig_stab = create_stability_distribution_chart(cards_df)
     fig_diff = create_difficulty_distribution_chart(cards_df)
-    fig_completion = create_completion_chart(get_completion_projection(deck_id=deck_id))
     fig_retention = create_retention_workload_chart(get_retention_workload_curve(deck_id=deck_id))
-    fig_cohorts = create_cohort_chart(get_cohort_maturity_curves(deck_id=deck_id))
+
+    # Load by Introduction: date range + session bucketing
+    intro_df = get_load_by_introduction(deck_id=deck_id, use_stability=use_stability)
+    if cutoff is not None and not intro_df.empty:
+        intro_df = intro_df[intro_df['intro_date'] >= cutoff]
+    fig_load_intro = create_load_by_introduction_chart(
+        intro_df, use_sessions=use_sessions, session_dates=session_dates)
+
     fig_fatigue = create_fatigue_chart(get_fatigue_curve(deck_id=deck_id))
 
+    # Load Trend: date range + session numbering
+    load_df = get_load_timeseries(deck_id=deck_id, use_stability=use_stability)
+    if cutoff is not None and not load_df.empty:
+        load_df = load_df[load_df['date'] >= cutoff]
+    fig_load_trend = create_load_timeseries_chart(
+        load_df, use_sessions=use_sessions, session_dates=session_dates)
+
+    fig_lapse_load = create_lapse_load_chart(
+        get_lapse_load(deck_id=deck_id, use_stability=use_stability))
+
     return (fig_known, fig_calib, fig_ret, fig_stab, fig_diff,
-            fig_completion, fig_retention, fig_cohorts, fig_fatigue)
+            fig_retention, fig_load_intro, fig_fatigue, fig_load_trend,
+            fig_lapse_load)

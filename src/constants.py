@@ -368,6 +368,144 @@ INDEX_STRING = '''
             {%scripts%}
             {%renderer%}
         </footer>
+        <script>
+        /* Explanatory hover hints injected onto each chart's title + axis
+           titles as native SVG <title> tooltips. Re-applied on every Plotly
+           re-render via a MutationObserver (charts rebuild on filter changes,
+           drags and resizes). */
+        (function () {
+            var HINTS = {
+                'chart-daily-reviews': {
+                    title: 'Number of cards reviewed each day.',
+                    x: 'Calendar date (or session index in sessions mode).',
+                    y: 'Reviews done that day.'
+                },
+                'chart-hourly': {
+                    title: 'Review activity and accuracy broken down by hour of day.',
+                    x: 'Reviews done in that hour.',
+                    y: 'Hour of day (0 to 23).'
+                },
+                'chart-recall-rate': {
+                    title: 'Share of reviews answered correctly over time.',
+                    x: 'Calendar date (or session index in sessions mode).',
+                    y: 'Percent of reviews rated Hard, Good or Easy.'
+                },
+                'chart-review-speed': {
+                    title: 'Average seconds spent per card over time.',
+                    x: 'Calendar date (or session index in sessions mode).',
+                    y: 'Seconds spent per card.'
+                },
+                'chart-known-words': {
+                    title: 'Estimated cards known over time, summing the retrievability of every seen card.',
+                    y: 'Number of known cards.'
+                },
+                'chart-future-load': {
+                    title: 'Upcoming due cards as a calendar heatmap, with a 7-day average trend.',
+                    y: 'Average cards due per day.'
+                },
+                'chart-calibration': {
+                    title: 'FSRS-predicted recall vs your observed recall.',
+                    x: 'FSRS-predicted probability of recall.',
+                    y: 'Fraction you actually recalled.'
+                },
+                'chart-retrievability-dist': {
+                    title: 'Distribution of current recall probability across your cards.',
+                    x: 'Probability of recalling the card now.',
+                    y: 'Number of cards.'
+                },
+                'chart-stability-dist': {
+                    title: 'Distribution of memory stability across your cards.',
+                    x: 'Days until recall falls to 90%.',
+                    y: 'Number of cards.'
+                },
+                'chart-difficulty-dist': {
+                    title: 'Distribution of FSRS difficulty across your cards.',
+                    x: 'FSRS difficulty (0 easy to 10 hard).',
+                    y: 'Number of cards.'
+                },
+                'chart-retention-workload': {
+                    title: 'Daily load implied by each desired-retention target at equilibrium.',
+                    x: 'Desired retention setting.',
+                    y: 'Daily load: reviews per day to sustain it.'
+                },
+                'chart-load-intro': {
+                    title: 'Current review load contributed by cards, grouped by when they were introduced.',
+                    x: 'Month the cards were first introduced.',
+                    y: 'Daily load from those cards (Σ 1/interval).'
+                },
+                'chart-load-trend': {
+                    title: 'Daily review load over time, reconstructed from your review history.',
+                    x: 'Calendar date.',
+                    y: 'Reviews per day the schedule generated (Σ 1/interval).'
+                },
+                'chart-lapse-load': {
+                    title: 'How much of your daily review load comes from cards with each lapse count.',
+                    x: 'Number of times the card has lapsed.',
+                    y: 'Daily load from those cards (Σ 1/interval).'
+                },
+                'chart-fatigue': {
+                    title: 'Success rate as a study session progresses.',
+                    x: 'Card position within a session.',
+                    y: 'Percent of reviews rated Hard, Good or Easy at that position.'
+                },
+                'chart-sim-memorized': {
+                    title: 'Projected future knowledge under the simulator settings above.',
+                    x: 'Projected future date.',
+                    y: 'Projected cards known.'
+                },
+                'chart-sim-reviews': {
+                    title: 'Projected future daily reviews under the simulator settings above.',
+                    x: 'Projected future date.',
+                    y: 'Projected reviews per day.'
+                }
+            };
+
+            function apply(el, tip) {
+                if (!el || !tip) return;
+                el.style.pointerEvents = 'all';
+                el.style.cursor = 'help';
+                var existing = el.querySelector('title');
+                if (existing) {
+                    if (existing.textContent !== tip) existing.textContent = tip;
+                    return;
+                }
+                var t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
+                t.textContent = tip;
+                el.insertBefore(t, el.firstChild);
+            }
+
+            function decorate() {
+                Object.keys(HINTS).forEach(function (id) {
+                    var root = document.getElementById(id);
+                    if (!root) return;
+                    var h = HINTS[id];
+                    apply(root.querySelector('.gtitle'), h.title);
+                    apply(root.querySelector('.xtitle'), h.x);
+                    apply(root.querySelector('.ytitle'), h.y);
+                });
+            }
+
+            var pending = false;
+            function schedule() {
+                if (pending) return;
+                pending = true;
+                requestAnimationFrame(function () { pending = false; decorate(); });
+            }
+
+            function start() {
+                decorate();
+                new MutationObserver(schedule).observe(
+                    document.body, { childList: true, subtree: true });
+                setInterval(decorate, 2000);  // cheap idempotent fallback
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', start);
+            } else {
+                start();
+            }
+        })();
+        </script>
     </body>
 </html>
 '''
