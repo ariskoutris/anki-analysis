@@ -10,6 +10,7 @@ Interactive Plotly Dash dashboard for analysing Anki flashcard reviews on FSRS-e
 src/
   __init__.py
   app.py                    – Slim orchestrator: Dash init, layout, callback registration, entry point
+  desktop.py                – Desktop entry point: pywebview window + Dash on a free port in a thread
   config.py                 – Project root + single DB path (data/anki.db)
   constants.py              – COLORS, MEMORY_COLORS, INDEX_STRING (HTML/CSS template)
   layout.py                 – create_stat_card, create_section_container, tab builders, create_main_layout
@@ -19,9 +20,11 @@ src/
   upload_handler.py         – .apkg file upload processing
   data_loader.py            – All SQL queries, FSRS calculations, DataFrame construction, summary stats
   fsrs_engine.py            – FSRS history replay (py-fsrs) + advanced analytics (see below)
-pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly, fsrs); managed with uv
+pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly, fsrs, pywebview); managed with uv
 uv.lock                     – Pinned dependency lockfile
 data/                       – Not tracked. Contains single anki.db snapshot
+scripts/install-launcher.sh – Builds ~/Applications/Anki Dashboard.app (macOS) pointing at this checkout
+assets/icon.png             – 1024px app icon (converted to .icns by the install script)
 ```
 
 ## Architecture
@@ -218,5 +221,11 @@ Charts support a date/session x-axis toggle. In session mode, sequential indices
 ## Running
 
 ```bash
-uv run python -m src.app     # starts on http://127.0.0.1:8050
+uv run python -m src.app      # dev server on http://127.0.0.1:8050 (debug + hot reload)
+uv run python -m src.desktop  # native window, no debug; what the .app launcher runs
 ```
+
+The `.app` launcher's `Contents/MacOS/launch` runs `uv sync` then `exec`s `.venv/bin/python -m src.desktop`
+(exec, not `uv run`, so the Dock shows the bundle's name/icon). Output goes to
+`~/Library/Logs/anki-dashboard.log`. First launch triggers a macOS privacy prompt for the repo's folder
+(e.g. ~/Documents); until accepted, the launcher hangs silently on `uv sync`.
