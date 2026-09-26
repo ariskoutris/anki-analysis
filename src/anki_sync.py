@@ -7,7 +7,7 @@ import os
 import platform
 import shutil
 import subprocess
-import hashlib
+import filecmp
 import json
 import time
 from pathlib import Path
@@ -155,28 +155,6 @@ def check_collection_lock(collection_path: Path) -> bool:
     return False
 
 
-def _compute_file_sha256(file_path: Path, chunk_size: int = 1024 * 1024) -> Optional[str]:
-    """Compute SHA256 hash for a file."""
-    if not file_path.exists() or not file_path.is_file():
-        return None
-
-    hasher = hashlib.sha256()
-    with file_path.open("rb") as f:
-        while True:
-            chunk = f.read(chunk_size)
-            if not chunk:
-                break
-            hasher.update(chunk)
-    return hasher.hexdigest()
-
-
-def _files_identical(file_a: Path, file_b: Path) -> bool:
-    """Check whether two files are byte-identical using SHA256."""
-    hash_a = _compute_file_sha256(file_a)
-    hash_b = _compute_file_sha256(file_b)
-    return bool(hash_a and hash_b and hash_a == hash_b)
-
-
 LAST_SYNC_FILE = "last_sync.json"
 
 
@@ -194,20 +172,16 @@ def get_last_sync_time(data_root: str) -> Optional[float]:
         return None
 
 
-def sync_from_anki(profile_name: Optional[str], data_root: str) -> Tuple[bool, str]:
+def sync_from_anki(data_root: str) -> Tuple[bool, str]:
     """
-    Sync Anki collection from local installation to data/anki.db.
+    Sync the first Anki profile's collection from the local install to data/anki.db.
     Records the time of every successful sync in data/last_sync.json
     (an unchanged collection counts as success: the snapshot is current).
-
-    Args:
-        profile_name: Name of Anki profile to sync (None for auto-detect)
-        data_root: Root data directory for the dashboard
 
     Returns:
         (success: bool, message: str)
     """
-    success, message = _sync_from_anki(profile_name, data_root)
+    success, message = _sync_from_anki(data_root)
     if success:
         # Best-effort: failing to record the time must not fail the sync
         try:
@@ -218,17 +192,8 @@ def sync_from_anki(profile_name: Optional[str], data_root: str) -> Tuple[bool, s
     return success, message
 
 
-def _sync_from_anki(profile_name: Optional[str], data_root: str) -> Tuple[bool, str]:
-    """
-    Copy the Anki collection into data/anki.db (see sync_from_anki).
-
-    Args:
-        profile_name: Name of Anki profile to sync (None for auto-detect)
-        data_root: Root data directory for the dashboard
-
-    Returns:
-        (success: bool, message: str)
-    """
+def _sync_from_anki(data_root: str) -> Tuple[bool, str]:
+    """Copy the Anki collection into data/anki.db (see sync_from_anki)."""
     # Check if Anki is installed
     base_path = get_anki_base_path()
     if not base_path:
@@ -239,18 +204,7 @@ def _sync_from_anki(profile_name: Optional[str], data_root: str) -> Tuple[bool, 
     if not profiles:
         return False, f"No Anki profiles found in {base_path}"
 
-    # Select profile
-    if profile_name:
-        # Find specific profile
-        matching = [p for p in profiles if p[0] == profile_name]
-        if not matching:
-            available = ", ".join([p[0] for p in profiles])
-            return False, f"Profile '{profile_name}' not found. Available: {available}"
-        collection_path = matching[0][1]
-        selected_profile = profile_name
-    else:
-        # No profile specified: use the first one detected
-        selected_profile, collection_path = profiles[0]
+    selected_profile, collection_path = profiles[0]
 
     # Safety check: Warn if Anki is running
     if is_anki_running():
@@ -274,7 +228,7 @@ def _sync_from_anki(profile_name: Optional[str], data_root: str) -> Tuple[bool, 
         if target_db.exists() and collection_path.name == "collection.anki21b":
             # Compare source collection to a cached copy if present
             cached_source = data_path / ".collection.anki21b.cache"
-            if cached_source.exists() and _files_identical(collection_path, cached_source):
+            if cached_source.exists() and filecmp.cmp(collection_path, cached_source, shallow=False):
                 return True, f"No changes detected for Anki profile '{selected_profile}'."
 
         # Ensure data directory exists
@@ -322,24 +276,3 @@ def _sync_from_anki(profile_name: Optional[str], data_root: str) -> Tuple[bool, 
     except Exception as e:
         staging_db.unlink(missing_ok=True)
         return False, f"Sync error: {str(e)}"
-
-
-def get_sync_info() -> dict:
-    """
-    Get information about Anki sync availability.
-
-    Returns:
-        Dictionary with sync status information
-    """
-    base_path = get_anki_base_path()
-    profiles = get_anki_profiles()
-    anki_running = is_anki_running()
-
-    return {
-        "anki_installed": base_path is not None,
-        "anki_path": str(base_path) if base_path else None,
-        "profiles_found": len(profiles),
-        "profiles": [p[0] for p in profiles],
-        "anki_running": anki_running,
-        "can_sync": len(profiles) > 0 and not anki_running,
-    }

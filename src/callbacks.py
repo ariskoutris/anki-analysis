@@ -4,15 +4,16 @@ All @callback decorators register against the global Dash app instance.
 """
 
 import base64
-import os
 import time
 from datetime import datetime
 import pandas as pd
-from dash import dcc, html, Input, Output, State, callback, clientside_callback, ctx, no_update
+import plotly.graph_objects as go
+from dash import Input, Output, State, callback, clientside_callback, ctx, no_update
 
-from .constants import COLORS
+from .config import DATA_DIR
+from .constants import COLORS, DARK_CHART_LAYOUT
 from .upload_handler import process_apkg_upload
-from .anki_sync import sync_from_anki, get_sync_info, get_last_sync_time
+from .anki_sync import sync_from_anki, get_last_sync_time
 from .layout import create_stat_item, DEFAULT_GRID_LAYOUT, sanitize_grid_item
 from .charts_session import (
     create_daily_reviews_chart,
@@ -45,7 +46,6 @@ from .data_loader import (
     get_memory_state_summary,
     get_session_summary_stats,
     get_workload_summary,
-    get_knowledge_health_stats,
     calculate_daily_load,
     get_load_timeseries,
     get_load_by_introduction,
@@ -64,55 +64,40 @@ from .fsrs_engine import (
 
 
 def parse_time_range(time_range):
-    """Parse time range value into review_days and year_filter."""
-    if time_range == 'all':
-        return None, None
-    return int(time_range) if time_range else None, None
+    """Time-range dropdown value -> number of days (None = all time)."""
+    return int(time_range) if time_range and time_range != 'all' else None
 
 
-# Dark toast styles
-_TOAST_SUCCESS = {
-    'display': 'block',
-    'padding': '8px 14px',
-    'backgroundColor': '#162312',
-    'color': COLORS['success'],
-    'border': f'1px solid {COLORS["success"]}',
-    'borderRadius': '4px',
-    'fontSize': '12px',
-    'position': 'fixed',
-    'top': '12px',
-    'right': '12px',
-    'zIndex': '1000',
-    'boxShadow': '0 4px 12px rgba(0,0,0,0.5)',
-}
-_TOAST_ERROR = {
-    'display': 'block',
-    'padding': '8px 14px',
-    'backgroundColor': '#2a1215',
-    'color': COLORS['danger'],
-    'border': f'1px solid {COLORS["danger"]}',
-    'borderRadius': '4px',
-    'fontSize': '12px',
-    'position': 'fixed',
-    'top': '12px',
-    'right': '12px',
-    'zIndex': '1000',
-    'boxShadow': '0 4px 12px rgba(0,0,0,0.5)',
-}
-_TOAST_WARN = {
-    'display': 'block',
-    'padding': '8px 14px',
-    'backgroundColor': '#2a2010',
-    'color': COLORS['warning'],
-    'border': f'1px solid {COLORS["warning"]}',
-    'borderRadius': '4px',
-    'fontSize': '12px',
-    'position': 'fixed',
-    'top': '12px',
-    'right': '12px',
-    'zIndex': '1000',
-    'boxShadow': '0 4px 12px rgba(0,0,0,0.5)',
-}
+# Toast colours; position and shape come from the .toast-msg CSS class
+def _toast(color, bg):
+    return {'display': 'block', 'color': color, 'backgroundColor': bg,
+            'border': f'1px solid {color}'}
+
+
+_TOAST_SUCCESS = _toast(COLORS['success'], '#162312')
+_TOAST_ERROR = _toast(COLORS['danger'], '#2a1215')
+
+
+def _segmented_styles(left_active):
+    """Styles for a two-button segmented toggle (left, right)."""
+    base = {'padding': '4px 12px', 'cursor': 'pointer', 'fontSize': '12px',
+            'fontWeight': '500', 'lineHeight': '1.4'}
+    active = {**base, 'border': f'1px solid {COLORS["primary"]}',
+              'backgroundColor': COLORS['primary'], 'color': '#fff'}
+    inactive = {**base, 'border': f'1px solid {COLORS["border"]}',
+                'backgroundColor': COLORS['bg_secondary'], 'color': COLORS['text_secondary']}
+    left, right = (active, inactive) if left_active else (inactive, active)
+    return ({**left, 'borderRadius': '3px 0 0 3px'},
+            {**right, 'borderRadius': '0 3px 3px 0', 'borderLeft': 'none'})
+
+
+_EMPTY_FIG = go.Figure(layout=dict(
+    plot_bgcolor=DARK_CHART_LAYOUT['plot_bgcolor'],
+    paper_bgcolor=DARK_CHART_LAYOUT['paper_bgcolor'],
+    xaxis=dict(visible=False), yaxis=dict(visible=False),
+    annotations=[dict(text='No data', xref='paper', yref='paper', x=0.5, y=0.5,
+                      showarrow=False, font=dict(size=14, color=COLORS['text_muted']))],
+))
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +131,6 @@ def update_overview_container(_refresh_token, _url, deck_value, load_basis):
     memory = get_memory_state_summary(deck_id=deck_id)
     workload = get_workload_summary(deck_id=deck_id)
     session_stats = get_session_summary_stats(deck_id=deck_id)
-    health = get_knowledge_health_stats(deck_id=deck_id)
 
     # Primary stats
     upcoming = create_stat_item(
@@ -315,18 +299,8 @@ clientside_callback(
 )
 def load_ui_from_store(_, ui_store):
     """Load UI preferences from local storage on page load."""
-    defaults = {
-        'session_time_range': 'all',
-        'deck_filter': 'all'
-    }
-
-    if not ui_store:
-        ui_store = defaults
-
-    session = ui_store.get('session_time_range', defaults['session_time_range'])
-    deck = ui_store.get('deck_filter', defaults['deck_filter'])
-
-    return session, deck
+    ui_store = ui_store or {}
+    return ui_store.get('session_time_range', 'all'), ui_store.get('deck_filter', 'all')
 
 
 # ---------------------------------------------------------------------------
@@ -345,26 +319,6 @@ def load_ui_from_store(_, ui_store):
 )
 def toggle_xaxis_mode(dates_clicks, sessions_clicks, _, ui_store):
     """Toggle between dates and sessions x-axis mode."""
-    base = {
-        'padding': '4px 12px',
-        'cursor': 'pointer',
-        'fontSize': '12px',
-        'fontWeight': '500',
-        'lineHeight': '1.4',
-    }
-    active_style = {
-        **base,
-        'border': f'1px solid {COLORS["primary"]}',
-        'backgroundColor': COLORS['primary'],
-        'color': '#fff',
-    }
-    inactive_style = {
-        **base,
-        'border': f'1px solid {COLORS["border"]}',
-        'backgroundColor': COLORS['bg_secondary'],
-        'color': COLORS['text_secondary'],
-    }
-
     triggered = ctx.triggered_id
 
     if triggered == 'url' or not triggered:
@@ -374,14 +328,7 @@ def toggle_xaxis_mode(dates_clicks, sessions_clicks, _, ui_store):
     else:
         mode = 'sessions'
 
-    if mode == 'dates':
-        dates_s = {**active_style, 'borderRadius': '3px 0 0 3px'}
-        sessions_s = {**inactive_style, 'borderRadius': '0 3px 3px 0', 'borderLeft': 'none'}
-    else:
-        dates_s = {**inactive_style, 'borderRadius': '3px 0 0 3px'}
-        sessions_s = {**active_style, 'borderRadius': '0 3px 3px 0', 'borderLeft': 'none'}
-
-    return mode, dates_s, sessions_s
+    return (mode, *_segmented_styles(mode == 'dates'))
 
 
 @callback(
@@ -396,14 +343,6 @@ def toggle_xaxis_mode(dates_clicks, sessions_clicks, _, ui_store):
 )
 def toggle_load_basis(_interval_clicks, _stability_clicks, _, ui_store):
     """Toggle load computations between stored intervals and stability."""
-    base = {'padding': '4px 12px', 'cursor': 'pointer', 'fontSize': '12px',
-            'fontWeight': '500', 'lineHeight': '1.4'}
-    active_style = {**base, 'border': f'1px solid {COLORS["primary"]}',
-                    'backgroundColor': COLORS['primary'], 'color': '#fff'}
-    inactive_style = {**base, 'border': f'1px solid {COLORS["border"]}',
-                      'backgroundColor': COLORS['bg_secondary'],
-                      'color': COLORS['text_secondary']}
-
     triggered = ctx.triggered_id
     if triggered == 'url' or not triggered:
         basis = (ui_store or {}).get('load_basis', 'interval')
@@ -412,14 +351,7 @@ def toggle_load_basis(_interval_clicks, _stability_clicks, _, ui_store):
     else:
         basis = 'interval'
 
-    if basis == 'interval':
-        interval_s = {**active_style, 'borderRadius': '3px 0 0 3px'}
-        stability_s = {**inactive_style, 'borderRadius': '0 3px 3px 0', 'borderLeft': 'none'}
-    else:
-        interval_s = {**inactive_style, 'borderRadius': '3px 0 0 3px'}
-        stability_s = {**active_style, 'borderRadius': '0 3px 3px 0', 'borderLeft': 'none'}
-
-    return basis, interval_s, stability_s
+    return (basis, *_segmented_styles(basis == 'interval'))
 
 
 # ---------------------------------------------------------------------------
@@ -474,11 +406,7 @@ def handle_backup_upload(contents, filename):
         content_type, content_string = contents.split(',')
         file_bytes = base64.b64decode(content_string)
 
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        project_dir = os.path.dirname(script_dir)
-        data_dir = os.path.join(project_dir, 'data')
-
-        success, message = process_apkg_upload(file_bytes, data_dir)
+        success, message = process_apkg_upload(file_bytes, DATA_DIR)
 
         if success:
             return message, _TOAST_SUCCESS, False, 0, time.time()
@@ -509,23 +437,8 @@ def handle_anki_sync(n_clicks):
     if not n_clicks:
         return "", {'display': 'none'}, False, 0, no_update
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    project_dir = os.path.dirname(script_dir)
-    data_dir = os.path.join(project_dir, 'data')
-
-    sync_info = get_sync_info()
-
-    if not sync_info['anki_installed']:
-        return "Anki installation not found.", _TOAST_WARN, False, 0, no_update
-
-    if sync_info['profiles_found'] == 0:
-        return f"No Anki profiles found in {sync_info['anki_path']}", _TOAST_WARN, False, 0, no_update
-
-    if sync_info['anki_running']:
-        return "Anki is running. Close it before syncing.", _TOAST_ERROR, False, 0, no_update
-
     try:
-        success, message = sync_from_anki(None, data_dir)
+        success, message = sync_from_anki(DATA_DIR)
         if success:
             return message, _TOAST_SUCCESS, False, 0, time.time()
         else:
@@ -546,8 +459,7 @@ def handle_anki_sync(n_clicks):
 )
 def update_last_sync_indicator(_refresh_token, _url):
     """Show when the last successful Anki sync happened (uploads don't count)."""
-    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
-    ts = get_last_sync_time(data_dir)
+    ts = get_last_sync_time(DATA_DIR)
     if ts is None:
         return 'Never synced', 'No successful sync from Anki recorded'
 
@@ -648,28 +560,17 @@ def run_forecast_simulation(_n, days, retention, new_per_day, max_reviews, deck_
 def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value, ui_store):
     """Update session charts based on time range and x-axis mode."""
     use_sessions = (xaxis_mode == 'sessions')
-    review_days, year_filter = parse_time_range(time_range)
+    review_days = parse_time_range(time_range)
     deck_id = None if deck_value == 'all' else int(deck_value)
     forecast_days = 365
 
-    session_df = get_session_data(review_days, year_filter, deck_id=deck_id)
-    hourly_df = get_hourly_stats(review_days, year_filter, deck_id=deck_id)
-    daily_df = get_daily_reviews(review_days, year_filter, deck_id=deck_id)
+    session_df = get_session_data(review_days, deck_id=deck_id)
+    hourly_df = get_hourly_stats(review_days, deck_id=deck_id)
+    daily_df = get_daily_reviews(review_days, deck_id=deck_id)
     forecast_df = get_future_load_forecast(forecast_days, deck_id=deck_id)
 
-    import plotly.graph_objects as go
-    empty = go.Figure()
-    empty.update_layout(
-        plot_bgcolor='#111217', paper_bgcolor='#111217',
-        font=dict(color='#5a5e72'),
-        xaxis=dict(visible=False), yaxis=dict(visible=False),
-        annotations=[dict(text='No data', xref='paper', yref='paper',
-                          x=0.5, y=0.5, showarrow=False,
-                          font=dict(size=14, color='#5a5e72'))]
-    )
-
     if session_df.empty:
-        return empty, empty, empty, empty, empty
+        return (_EMPTY_FIG,) * 5
 
     fig_daily = create_daily_reviews_chart(daily_df, use_sessions=use_sessions)
     fig_hourly = create_hourly_chart(hourly_df)
@@ -710,24 +611,13 @@ def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode, load_
     deck_id = None if deck_value == 'all' else int(deck_value)
     use_sessions = (xaxis_mode == 'sessions')
     use_stability = (load_basis == 'stability')
-    review_days, _ = parse_time_range(time_range)
+    review_days = parse_time_range(time_range)
     cutoff = (None if review_days is None
               else pd.Timestamp(datetime.now().date()) - pd.Timedelta(days=review_days))
     cards_df = get_card_data(deck_id=deck_id)
 
-    import plotly.graph_objects as go
-    empty = go.Figure()
-    empty.update_layout(
-        plot_bgcolor='#111217', paper_bgcolor='#111217',
-        font=dict(color='#5a5e72'),
-        xaxis=dict(visible=False), yaxis=dict(visible=False),
-        annotations=[dict(text='No data', xref='paper', yref='paper',
-                          x=0.5, y=0.5, showarrow=False,
-                          font=dict(size=14, color='#5a5e72'))]
-    )
-
     if cards_df.empty:
-        return (empty,) * 10
+        return (_EMPTY_FIG,) * 10
 
     session_dates = get_session_dates(deck_id=deck_id)
 

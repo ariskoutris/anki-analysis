@@ -12,7 +12,7 @@ src/
   app.py                    – Slim orchestrator: Dash init, layout, callback registration, entry point
   desktop.py                – Desktop entry point: pywebview window + Dash on a free port in a thread
   config.py                 – Project root + single DB path (data/anki.db)
-  constants.py              – COLORS, MEMORY_COLORS, INDEX_STRING (HTML/CSS template)
+  constants.py              – COLORS, DARK_CHART_LAYOUT, INDEX_STRING (HTML/CSS template)
   layout.py                 – create_stat_card, create_section_container, tab builders, create_main_layout
   callbacks.py              – All @callback functions + parse_time_range
   charts_session.py         – 5 session chart functions + session-mode helpers
@@ -65,23 +65,20 @@ constants.py            (leaf – zero internal deps)
 
 Simple path helpers. Key exports:
 
-- `get_project_root()` – returns project root directory
+- `DATA_DIR` – project `data/` directory (sync, upload and last-sync file all live here)
 - `get_db_path()` – returns `data/anki.db` (single snapshot, no date selection)
 
 ### data_loader.py
 
 Pure data layer. Every public function opens its own `sqlite3` connection via `connect_db()` → `get_db_path()`. No caching across requests (each callback gets fresh data).
 
-**Session-level queries** (all accept `review_days`/`year_filter`):
+**Session-level queries** (all accept `review_days`):
 - `get_session_data()` – per-day session stats (cards, success rate, timing)
 - `get_hourly_stats()` – aggregated by hour-of-day
 - `get_daily_reviews()` – daily review counts
-- `get_review_intervals()` – success rate by review interval (memory decay curve)
 
 **Card-level queries:**
 - `get_card_data()` – all review cards with FSRS params parsed from `cards.data` JSON (`s`, `d`, `lrt`). Computes retrievability in Python.
-- `get_total_time_per_card()` – joins `revlog` to sum time per card, with FSRS metrics
-- `get_card_review_history(card_id)` – single-card review log
 
 **Summaries:**
 - `get_overview_stats()` – card/review counts, total hours, date range
@@ -91,11 +88,8 @@ Pure data layer. Every public function opens its own `sqlite3` connection via `c
 
 **Section summary functions:**
 - `get_consistency_stats()` – streak tracking, study regularity
-- `get_best_study_hour()` – hour with highest success rate
-- `get_session_summary_stats()` – weekly velocity, trend, avg session size
+- `get_session_summary_stats()` – current streak + avg recall rate (stat strip)
 - `get_workload_summary()` – due this week, overdue cards, peak day
-- `get_knowledge_health_stats()` – health score, cards needing attention, maturity %
-- `get_leech_candidates()` – problem cards ranked by time wasted
 **Key SQL conventions:**
 - `r.type != 4` excludes manual reschedules
 - `c.queue != -1` excludes suspended cards
@@ -115,15 +109,13 @@ Deck→preset mapping comes from the `decks.kind` protobuf (field 1.1 = config i
   card still in collection) with predicted retrievability + stability/difficulty
   before/after. Cached per (db mtime, deck_id). Validated against Anki's own
   `cards.data` snapshot: difficulty exact, stability median rel-err ~3%
-  (residual = Anki day-cutoff rounding). Use `validate_replay()` to re-check.
+  (residual = Anki day-cutoff rounding).
 - `get_known_words_timeseries` – Σ retrievability over all seen cards per day
   (hero chart, full-width row)
 - `get_calibration_data` / `get_calibration_summary` – predicted vs observed
   recall, equal-count bins, Wilson CIs; same-day reviews excluded
 - `get_retention_workload_curve` – desired retention sweep → equilibrium
   reviews/day via I(R_d,S) = S/factor · (R_d^(1/decay) − 1)
-- `get_cohort_maturity_curves` – % of introduction-year cohort with stability
-  > 30d vs card age (state occupancy, right-censored)
 - `get_fatigue_curve` – accuracy/answer-time vs within-session position
   (sessions split on >30 min gaps)
 - `simulate_future` – Monte-Carlo forward FSRS simulation (Anki's FSRS
@@ -142,7 +134,7 @@ FSRS-6 forgetting curve used throughout: `R(t) = (1 + factor·t/S)^decay`,
 
 Shared styling constants used across all dashboard modules:
 - `COLORS` dict – primary palette for charts
-- `MEMORY_COLORS` dict – retrievability category colors
+- `DARK_CHART_LAYOUT` / `DARK_CHART_AXIS` – shared Plotly dark theme
 - `INDEX_STRING` – custom HTML/CSS template for `app.index_string`
 
 ### layout.py
@@ -217,7 +209,7 @@ Charts support a date/session x-axis toggle. In session mode, sequential indices
 - FSRS params live in `cards.data` as JSON: `{"s": stability, "d": difficulty, "lrt": last_review_timestamp_sec, ...}`
 - Retrievability formula: `R = exp(ln(0.9) * days_since_review / stability)`
 - All SQL filters are built via `build_time_filter()` which returns a SQL fragment
-- Charts use a shared `COLORS` dict and `MEMORY_COLORS` dict for consistent styling (defined in `constants.py`)
+- Charts use a shared `COLORS` dict and `DARK_CHART_LAYOUT` for consistent styling (defined in `constants.py`)
 - All modules use relative imports (`from .constants import COLORS`); run via `uv run python -m src.app`
 
 ## Running

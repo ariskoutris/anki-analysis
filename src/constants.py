@@ -5,7 +5,6 @@ Shared constants for the Anki Learning Dashboard.
 # Dark color palette
 COLORS = {
     'bg_canvas': '#0b0c0e',
-    'bg_primary': '#111217',
     'bg_secondary': '#181b23',
     'border': '#2a2d3a',
     'text_primary': '#e0e0e0',
@@ -17,20 +16,6 @@ COLORS = {
     'warning': '#f0b429',
     'danger': '#f25f5c',
     'info': '#29b6f6',
-    'critical': '#f25f5c',
-    'at_risk': '#f0973a',
-    'moderate': '#f0d264',
-    'good': '#2dd4a8',
-    'excellent': '#29b6f6',
-}
-
-# Memory state colors
-MEMORY_COLORS = {
-    'Critical (<50%)': COLORS['critical'],
-    'At Risk (50-70%)': COLORS['at_risk'],
-    'Moderate (70-85%)': COLORS['moderate'],
-    'Good (85-95%)': COLORS['good'],
-    'Excellent (95%+)': COLORS['excellent'],
 }
 
 # Shared dark chart layout
@@ -172,23 +157,12 @@ INDEX_STRING = '''
             }
 
             /* Chart grid */
-            .chart-grid {
-                display: grid;
-                grid-template-columns: repeat(3, 1fr);
-                gap: 8px;
-            }
             .chart-panel {
                 background: #111217;
                 border: 1px solid #2a2d3a;
                 border-radius: 4px;
                 padding: 4px;
                 min-height: 0;
-            }
-            .chart-panel--wide {
-                grid-column: span 2;
-            }
-            .chart-panel--full {
-                grid-column: 1 / -1;
             }
 
             /* Draggable grid items */
@@ -333,21 +307,7 @@ INDEX_STRING = '''
             }
 
             /* Responsive breakpoints */
-            @media (max-width: 1200px) {
-                .chart-grid {
-                    grid-template-columns: repeat(2, 1fr);
-                }
-                .chart-panel--wide {
-                    grid-column: span 2;
-                }
-            }
             @media (max-width: 768px) {
-                .chart-grid {
-                    grid-template-columns: 1fr;
-                }
-                .chart-panel--wide {
-                    grid-column: span 1;
-                }
                 .top-bar {
                     flex-direction: column;
                     align-items: flex-start;

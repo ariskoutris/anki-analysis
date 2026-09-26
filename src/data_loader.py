@@ -82,35 +82,20 @@ def build_deck_filter(deck_id: int | None = None) -> str:
 # SESSION DATA
 # =============================================================================
 
-def build_time_filter(review_days: int | None = None, year_filter: int | None = None) -> str:
-    """
-    Build SQL filter for time-based queries.
-
-    Parameters:
-        review_days: Only include reviews from the last N days
-        year_filter: Only include reviews from a specific year
-
-    Returns:
-        SQL WHERE clause fragment
-    """
-    if year_filter:
-        # Filter for a specific year
-        start_timestamp = datetime(year_filter, 1, 1).timestamp()
-        end_timestamp = datetime(year_filter + 1, 1, 1).timestamp()
-        return f"AND r.id/1000 >= {start_timestamp} AND r.id/1000 < {end_timestamp}"
-    elif review_days:
-        cutoff_timestamp = (datetime.now() - timedelta(days=review_days)).timestamp()
-        return f"AND r.id/1000 >= {cutoff_timestamp}"
-    return ""
+def build_time_filter(review_days: int | None = None) -> str:
+    """SQL fragment limiting reviews to the last N days ("" for all)."""
+    if not review_days:
+        return ""
+    cutoff_timestamp = (datetime.now() - timedelta(days=review_days)).timestamp()
+    return f"AND r.id/1000 >= {cutoff_timestamp}"
 
 
-def get_session_data(review_days: int | None = None, year_filter: int | None = None, deck_id: int | None = None) -> pd.DataFrame:
+def get_session_data(review_days: int | None = None, deck_id: int | None = None) -> pd.DataFrame:
     """
     Extract comprehensive session-based statistics.
 
     Parameters:
         review_days: Only include reviews from the last N days (None = all)
-        year_filter: Only include reviews from a specific year (None = no filter)
         deck_id: Only include reviews for cards in this deck (None = all decks)
 
     Returns:
@@ -119,7 +104,7 @@ def get_session_data(review_days: int | None = None, year_filter: int | None = N
     conn = connect_db()
 
     # Build review time filter
-    review_filter = build_time_filter(review_days, year_filter)
+    review_filter = build_time_filter(review_days)
     deck_filter = build_deck_filter(deck_id)
 
     query = f"""
@@ -171,11 +156,11 @@ def get_session_data(review_days: int | None = None, year_filter: int | None = N
     return df
 
 
-def get_hourly_stats(review_days: int | None = None, year_filter: int | None = None, deck_id: int | None = None) -> pd.DataFrame:
+def get_hourly_stats(review_days: int | None = None, deck_id: int | None = None) -> pd.DataFrame:
     """Get aggregated statistics by hour of day"""
     conn = connect_db()
 
-    review_filter = build_time_filter(review_days, year_filter)
+    review_filter = build_time_filter(review_days)
     deck_filter = build_deck_filter(deck_id)
 
     query = f"""
@@ -202,11 +187,11 @@ def get_hourly_stats(review_days: int | None = None, year_filter: int | None = N
     return df
 
 
-def get_daily_reviews(review_days: int | None = None, year_filter: int | None = None, deck_id: int | None = None) -> pd.DataFrame:
+def get_daily_reviews(review_days: int | None = None, deck_id: int | None = None) -> pd.DataFrame:
     """Get daily review statistics"""
     conn = connect_db()
 
-    review_filter = build_time_filter(review_days, year_filter)
+    review_filter = build_time_filter(review_days)
     deck_filter = build_deck_filter(deck_id)
 
     query = f"""
@@ -232,37 +217,6 @@ def get_daily_reviews(review_days: int | None = None, year_filter: int | None = 
     if not df.empty:
         df['date'] = pd.to_datetime(df['review_date'])
         df['success_rate'] = (df['daily_success'] / df['daily_reviews'] * 100).fillna(0)
-
-    return df
-
-
-def get_review_intervals(review_days: int | None = None, year_filter: int | None = None, deck_id: int | None = None) -> pd.DataFrame:
-    """Get review success rates by interval (for memory decay curve)"""
-    conn = connect_db()
-
-    review_filter = build_time_filter(review_days, year_filter)
-    deck_filter = build_deck_filter(deck_id)
-
-    query = f"""
-        SELECT
-            r.ivl as interval_days,
-            AVG(CASE WHEN r.ease >= 2 THEN 1.0 ELSE 0.0 END) * 100 as success_rate,
-            COUNT(*) as review_count
-        FROM revlog r
-        JOIN cards c ON r.cid = c.id
-        WHERE r.type = 1
-          AND r.ivl > 0
-          AND r.ivl <= 365
-          AND c.queue != -1
-          {review_filter}
-          {deck_filter}
-        GROUP BY r.ivl
-        HAVING review_count >= 3
-        ORDER BY r.ivl
-    """
-
-    df = pd.read_sql_query(query, conn)
-    conn.close()
 
     return df
 
@@ -380,117 +334,6 @@ def get_card_data(include_suspended: bool = True, deck_id: int | None = None) ->
         'days_overdue': days_overdues,
         'is_suspended': is_suspendeds,
         'card_type': card_types
-    })
-
-
-def get_card_review_history(card_id: int) -> pd.DataFrame:
-    """Get the review history for a specific card"""
-    conn = connect_db()
-
-    query = f"""
-        SELECT
-            datetime(r.id/1000, 'unixepoch', 'localtime') as review_time,
-            r.ease,
-            r.ivl,
-            r.time/1000.0 as time_seconds,
-            r.type
-        FROM revlog r
-        WHERE r.cid = {card_id}
-        ORDER BY r.id
-    """
-
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-
-    if not df.empty:
-        df['review_time'] = pd.to_datetime(df['review_time'])
-
-    return df
-
-
-def get_total_time_per_card(deck_id: int | None = None) -> pd.DataFrame:
-    """Get total time spent on each card"""
-    conn = connect_db()
-
-    deck_filter = build_deck_filter(deck_id)
-
-    query = f"""
-        SELECT
-            c.id as card_id,
-            c.data,
-            c.reps,
-            c.lapses,
-            SUM(r.time)/1000.0 as total_time_seconds,
-            COUNT(r.id) as total_reviews
-        FROM cards c
-        LEFT JOIN revlog r ON c.id = r.cid
-        WHERE c.data IS NOT NULL
-          AND c.data != ""
-          AND c.queue != -1
-          AND c.type IN (1, 2)
-          {deck_filter}
-        GROUP BY c.id
-    """
-
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-
-    # Parse FSRS data and add metrics - using column lists to avoid pandas issues
-    card_ids = []
-    stabilities = []
-    difficulties = []
-    retrievabilities = []
-    reps_list = []
-    lapses_list = []
-    total_times = []
-    total_reviews_list = []
-    avg_times = []
-
-    current_time = datetime.now()
-    current_timestamp_ms = int(current_time.timestamp() * 1000)
-
-    for _, row in df.iterrows():
-        fsrs = parse_fsrs_data(row['data'])
-        if fsrs and 's' in fsrs and 'd' in fsrs:
-            stability = fsrs['s']
-            difficulty = fsrs['d']
-            last_review_time_sec = fsrs.get('lrt', 0)
-
-            if last_review_time_sec > 0:
-                days_since_review = (current_timestamp_ms / 1000 - last_review_time_sec) / 86400
-            else:
-                days_since_review = 0
-
-            retrievability = calculate_retrievability(stability, days_since_review) * 100
-            total_time = float(row['total_time_seconds'] or 0)
-            total_revs = int(row['total_reviews'] or 0)
-
-            card_ids.append(int(row['card_id']))
-            stabilities.append(float(stability))
-            difficulties.append(float(difficulty))
-            retrievabilities.append(float(retrievability))
-            reps_list.append(int(row['reps']))
-            lapses_list.append(int(row['lapses']))
-            total_times.append(total_time)
-            total_reviews_list.append(total_revs)
-            avg_times.append(total_time / max(total_revs, 1))
-
-    if not card_ids:
-        return pd.DataFrame(columns=[
-            'card_id', 'stability', 'difficulty', 'retrievability', 'reps',
-            'lapses', 'total_time_seconds', 'total_reviews', 'avg_time_per_review'
-        ])
-
-    return pd.DataFrame({
-        'card_id': card_ids,
-        'stability': stabilities,
-        'difficulty': difficulties,
-        'retrievability': retrievabilities,
-        'reps': reps_list,
-        'lapses': lapses_list,
-        'total_time_seconds': total_times,
-        'total_reviews': total_reviews_list,
-        'avg_time_per_review': avg_times
     })
 
 
@@ -839,109 +682,6 @@ def get_lapse_load(deck_id: int | None = None,
             .reset_index().sort_values('lapses').reset_index(drop=True))
 
 
-def get_daily_load_by_stability(deck_id: int | None = None) -> pd.DataFrame:
-    """Get daily load contribution by stability ranges"""
-    cards_df = get_card_data(deck_id=deck_id)
-
-    if cards_df.empty:
-        return pd.DataFrame()
-
-    # Filter review cards with valid intervals
-    review_cards = cards_df[cards_df['interval'] > 0].copy()
-
-    if review_cards.empty:
-        return pd.DataFrame()
-
-    # Calculate load contribution per card
-    review_cards['interval_safe'] = review_cards['interval'].clip(lower=1)
-    review_cards['load_contribution'] = 1.0 / review_cards['interval_safe']
-
-    # Create stability bins
-    bins = [0, 7, 30, 90, 180, 365, float('inf')]
-    labels = ['<7d', '7-30d', '30-90d', '90-180d', '180-365d', '>365d']
-    review_cards['stability_range'] = pd.cut(review_cards['stability'], bins=bins, labels=labels)
-
-    # Group by stability range
-    result = review_cards.groupby('stability_range', observed=True).agg({
-        'load_contribution': 'sum',
-        'id': 'count'
-    }).reset_index()
-    result.columns = ['stability_range', 'load_contribution', 'card_count']
-
-    return result
-
-
-def get_daily_load_history(days: int = 90, deck_id: int | None = None) -> pd.DataFrame:
-    """
-    Calculate historical daily load over time.
-    Uses review log to reconstruct what the daily load was at different points.
-    """
-    conn = connect_db()
-
-    deck_filter = build_deck_filter(deck_id)
-
-    # Get snapshots of intervals over time from review log
-    query = f"""
-        WITH date_series AS (
-            SELECT date(julianday('now') - n) as check_date
-            FROM (
-                SELECT 0 as n UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL
-                SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL
-                SELECT 8 UNION ALL SELECT 9 UNION ALL SELECT 10 UNION ALL SELECT 11 UNION ALL
-                SELECT 12 UNION ALL SELECT 13 UNION ALL SELECT 14 UNION ALL SELECT 15 UNION ALL
-                SELECT 16 UNION ALL SELECT 17 UNION ALL SELECT 18 UNION ALL SELECT 19 UNION ALL
-                SELECT 20 UNION ALL SELECT 21 UNION ALL SELECT 22 UNION ALL SELECT 23 UNION ALL
-                SELECT 24 UNION ALL SELECT 25 UNION ALL SELECT 26 UNION ALL SELECT 27 UNION ALL
-                SELECT 28 UNION ALL SELECT 29 UNION ALL SELECT 30 UNION ALL SELECT 31 UNION ALL
-                SELECT 32 UNION ALL SELECT 33 UNION ALL SELECT 34 UNION ALL SELECT 35 UNION ALL
-                SELECT 36 UNION ALL SELECT 37 UNION ALL SELECT 38 UNION ALL SELECT 39 UNION ALL
-                SELECT 40 UNION ALL SELECT 41 UNION ALL SELECT 42 UNION ALL SELECT 43 UNION ALL
-                SELECT 44 UNION ALL SELECT 45 UNION ALL SELECT 46 UNION ALL SELECT 47 UNION ALL
-                SELECT 48 UNION ALL SELECT 49 UNION ALL SELECT 50 UNION ALL SELECT 51 UNION ALL
-                SELECT 52 UNION ALL SELECT 53 UNION ALL SELECT 54 UNION ALL SELECT 55 UNION ALL
-                SELECT 56 UNION ALL SELECT 57 UNION ALL SELECT 58 UNION ALL SELECT 59 UNION ALL
-                SELECT 60 UNION ALL SELECT 61 UNION ALL SELECT 62 UNION ALL SELECT 63 UNION ALL
-                SELECT 64 UNION ALL SELECT 65 UNION ALL SELECT 66 UNION ALL SELECT 67 UNION ALL
-                SELECT 68 UNION ALL SELECT 69 UNION ALL SELECT 70 UNION ALL SELECT 71 UNION ALL
-                SELECT 72 UNION ALL SELECT 73 UNION ALL SELECT 74 UNION ALL SELECT 75 UNION ALL
-                SELECT 76 UNION ALL SELECT 77 UNION ALL SELECT 78 UNION ALL SELECT 79 UNION ALL
-                SELECT 80 UNION ALL SELECT 81 UNION ALL SELECT 82 UNION ALL SELECT 83 UNION ALL
-                SELECT 84 UNION ALL SELECT 85 UNION ALL SELECT 86 UNION ALL SELECT 87 UNION ALL
-                SELECT 88 UNION ALL SELECT 89
-            )
-            LIMIT {days}
-        ),
-        daily_intervals AS (
-            SELECT
-                ds.check_date,
-                MAX(r.ivl) as interval
-            FROM date_series ds
-            LEFT JOIN revlog r ON date(r.id/1000, 'unixepoch', 'localtime') <= ds.check_date
-            JOIN cards c ON r.cid = c.id
-            WHERE r.type = 1  -- Review type
-              AND c.queue = 2  -- Review queue
-              AND r.ivl > 0
-              {deck_filter}
-            GROUP BY ds.check_date, r.cid
-        )
-        SELECT
-            check_date as date,
-            COUNT(*) as review_card_count,
-            SUM(1.0 / MAX(interval, 1)) as daily_load
-        FROM daily_intervals
-        GROUP BY check_date
-        ORDER BY check_date
-    """
-
-    df = pd.read_sql_query(query, conn)
-    conn.close()
-
-    if not df.empty:
-        df['date'] = pd.to_datetime(df['date'])
-
-    return df
-
-
 def get_rollover_hour(default: int = 4) -> int:
     """Anki's day-rollover hour (reviews before it belong to the previous day)."""
     try:
@@ -1043,57 +783,6 @@ def get_consistency_stats(review_days: int | None = None, deck_id: int | None = 
     }
 
 
-def get_best_study_hour(
-    review_days: int | None = None,
-    year_filter: int | None = None,
-    hourly_df: pd.DataFrame | None = None,
-    deck_id: int | None = None
-) -> int | None:
-    """Get the hour with highest success rate (min 20 reviews)."""
-    if hourly_df is None:
-        hourly_df = get_hourly_stats(review_days, year_filter, deck_id=deck_id)
-    if hourly_df.empty:
-        return None
-
-    # Filter hours with sufficient data
-    qualified = hourly_df[hourly_df['review_count'] >= 20]
-    if qualified.empty:
-        return None
-
-    best_idx = qualified['success_rate'].idxmax()
-    return int(qualified.loc[best_idx, 'hour'])
-
-
-def get_leech_candidates(min_lapses: int = 3, max_results: int = 20, deck_id: int | None = None) -> pd.DataFrame:
-    """
-    Identify problem cards (leeches) based on high lapse count and time wasted.
-
-    Returns DataFrame of cards sorted by "leech score" (time wasted on forgetting).
-    """
-    time_df = get_total_time_per_card(deck_id=deck_id)
-
-    if time_df.empty:
-        return pd.DataFrame()
-
-    # Filter to cards with significant lapses
-    leeches = time_df[time_df['lapses'] >= min_lapses].copy()
-
-    if leeches.empty:
-        return pd.DataFrame()
-
-    # Calculate leech score: time wasted = total_time * (lapses / reps)
-    # Higher score = more time spent on cards that keep failing
-    leeches['lapse_ratio'] = leeches['lapses'] / leeches['reps'].clip(lower=1)
-    leeches['time_wasted_seconds'] = leeches['total_time_seconds'] * leeches['lapse_ratio']
-    leeches['leech_score'] = leeches['time_wasted_seconds'] / 60  # Convert to minutes
-
-    # Sort by leech score and take top results
-    leeches = leeches.nlargest(max_results, 'leech_score')
-
-    return leeches[['card_id', 'lapses', 'reps', 'total_time_seconds', 'stability',
-                    'retrievability', 'lapse_ratio', 'leech_score']]
-
-
 def get_workload_summary(
     forecast_df: pd.DataFrame | None = None,
     cards_df: pd.DataFrame | None = None,
@@ -1145,116 +834,13 @@ def get_workload_summary(
     }
 
 
-def get_knowledge_health_stats(deck_id: int | None = None) -> dict:
-    """
-    Get summary statistics about knowledge health for section summary cards.
-
-    Returns:
-        Dictionary with health metrics
-    """
-    memory = get_memory_state_summary(deck_id=deck_id)
-    cards_df = get_card_data(deck_id=deck_id)
-
-    if memory['total'] == 0:
-        return {
-            'health_score': 0,
-            'cards_needing_attention': 0,
-            'median_retrievability': 0,
-            'avg_stability': 0,
-            'mature_cards_pct': 0,
-            'leech_count': 0
-        }
-
-    # Health score: percentage of cards in good or excellent state
-    health_score = round((memory['good'] + memory['excellent']) / memory['total'] * 100, 1)
-
-    # Cards needing attention: critical + at_risk
-    cards_needing_attention = memory['critical'] + memory['at_risk']
-
-    # Stability stats
-    avg_stability = 0
-    mature_cards_pct = 0
-    leech_count = 0
-
-    if not cards_df.empty:
-        avg_stability = round(float(cards_df['stability'].mean()), 1)
-        # Mature = stability > 30 days
-        mature_cards = (cards_df['stability'] > 30).sum()
-        mature_cards_pct = round(mature_cards / len(cards_df) * 100, 1)
-        # Leeches = cards with 3+ lapses
-        leech_count = int((cards_df['lapses'] >= 3).sum())
-
-    return {
-        'health_score': health_score,
-        'cards_needing_attention': cards_needing_attention,
-        'median_retrievability': memory['median_retrievability'],
-        'avg_stability': avg_stability,
-        'mature_cards_pct': mature_cards_pct,
-        'leech_count': leech_count
-    }
-
-
-def get_session_summary_stats(
-    review_days: int | None = None,
-    year_filter: int | None = None,
-    session_df: pd.DataFrame | None = None,
-    hourly_df: pd.DataFrame | None = None,
-    deck_id: int | None = None
-) -> dict:
-    """
-    Get summary statistics for session tab section cards.
-    """
-    if session_df is None:
-        session_df = get_session_data(review_days, year_filter, deck_id=deck_id)
-    consistency = get_consistency_stats(review_days, deck_id=deck_id)
-    best_hour = get_best_study_hour(review_days, year_filter, hourly_df=hourly_df, deck_id=deck_id)
-
-    if session_df.empty:
-        return {
-            'weekly_velocity': 0,
-            'avg_success_rate': 0,
-            'current_streak': consistency['current_streak'],
-            'best_hour': best_hour,
-            'avg_session_size': 0,
-            'trend': 'stable'
-        }
-
-    # Weekly velocity: avg reviews per day in last 7 days
-    recent = session_df.tail(7) if len(session_df) >= 7 else session_df
-    weekly_velocity = round(float(recent['total_cards'].mean()), 1)
-
-    # Average success rate
-    avg_success_rate = round(float(session_df['success_rate'].mean()), 1)
-
-    # Trend: compare last 7 sessions to previous 7
-    trend = 'stable'
-    if len(session_df) >= 14:
-        recent_avg = session_df.tail(7)['success_rate'].mean()
-        previous_avg = session_df.iloc[-14:-7]['success_rate'].mean()
-        diff = recent_avg - previous_avg
-        if diff > 2:
-            trend = 'up'
-        elif diff < -2:
-            trend = 'down'
-
-    avg_session_size = round(float(session_df['total_cards'].mean()), 0)
-
-    return {
-        'weekly_velocity': weekly_velocity,
-        'avg_success_rate': avg_success_rate,
-        'current_streak': consistency['current_streak'],
-        'best_hour': best_hour,
-        'avg_session_size': avg_session_size,
-        'trend': trend
-    }
-
-
-def get_historical_average_reviews(deck_id: int | None = None) -> float:
-    """Get historical average reviews per day for capacity line."""
+def get_session_summary_stats(deck_id: int | None = None) -> dict:
+    """Streak and average recall rate for the stat strip."""
     session_df = get_session_data(deck_id=deck_id)
-    if session_df.empty:
-        return 0
-    return round(float(session_df['total_cards'].mean()), 1)
+    return {
+        'avg_success_rate': 0 if session_df.empty else round(float(session_df['success_rate'].mean()), 1),
+        'current_streak': get_consistency_stats(deck_id=deck_id)['current_streak'],
+    }
 
 
 def get_future_load_forecast(days_ahead: int = 60, deck_id: int | None = None) -> pd.DataFrame:

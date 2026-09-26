@@ -286,44 +286,6 @@ def replay_reviews(deck_id: int | None = None) -> pd.DataFrame:
     return df
 
 
-def validate_replay(deck_id: int | None = None) -> pd.DataFrame:
-    """
-    Diagnostic: compare replayed final memory states against the FSRS
-    snapshot Anki stores in cards.data. Returns per-card comparison with
-    relative stability error.
-    """
-    import json
-
-    df = replay_reviews(deck_id)
-    if df.empty:
-        return pd.DataFrame()
-
-    final = df.groupby('cid').tail(1)[['cid', 's_after', 'd_after']]
-
-    conn = connect_db()
-    snap_rows = conn.execute("""
-        SELECT c.id, c.data FROM cards c
-        WHERE c.data IS NOT NULL AND c.data != '' AND c.type IN (1, 2)
-    """).fetchall()
-    conn.close()
-
-    snapshots = {}
-    for cid, data_json in snap_rows:
-        try:
-            data = json.loads(data_json)
-        except (ValueError, TypeError):
-            continue
-        if 's' in data and 'd' in data:
-            snapshots[cid] = (data['s'], data['d'])
-
-    final = final[final['cid'].isin(snapshots)].copy()
-    final['s_anki'] = final['cid'].map(lambda c: snapshots[c][0])
-    final['d_anki'] = final['cid'].map(lambda c: snapshots[c][1])
-    final['s_rel_err'] = (final['s_after'] - final['s_anki']).abs() / final['s_anki'].clip(lower=0.01)
-    final['d_abs_err'] = (final['d_after'] - final['d_anki']).abs()
-    return final
-
-
 # =============================================================================
 # KNOWN WORDS (expected vocabulary) TIME SERIES
 # =============================================================================
@@ -593,7 +555,6 @@ def simulate_future(
     FIRST = [Rating.Again, Rating.Hard, Rating.Good, Rating.Easy]
     SUCCESS = [Rating.Hard, Rating.Good, Rating.Easy]
     FIRST_P, SUCCESS_P = get_rating_distributions(deck_id)
-    start_ts = start.timestamp()
 
     def sample_review_rating(rng, r):
         """Again on lapse (prob 1-r); else Hard/Good/Easy per Anki weights."""
@@ -748,70 +709,6 @@ def get_fatigue_curve(
 # COHORT LEARNING CURVES
 # =============================================================================
 
-def get_cohort_maturity_curves(
-    deck_id: int | None = None,
-    threshold: float = 30.0,
-    max_age_days: int = 365,
-    step_days: int = 7,
-) -> pd.DataFrame:
-    """
-    For cards grouped by introduction year, track the share of the cohort
-    whose replayed stability exceeds `threshold` (the app's maturity bar)
-    as a function of card age. Cards are right-censored at their current
-    age, and lapses that knock stability back down are reflected honestly
-    (this is state occupancy, not one-way survival).
-
-    Returns long DataFrame: cohort, age_days, pct_mature, n
-    """
-    df = replay_reviews(deck_id)
-    if df.empty:
-        return pd.DataFrame(columns=['cohort', 'age_days', 'pct_mature', 'n'])
-
-    now_ts = datetime.now().timestamp()
-    age_grid = np.arange(0, max_age_days + 1, step_days, dtype=np.float64)
-
-    ts_arr = df['ts'].to_numpy(dtype=np.float64)
-    s_arr = df['s_after'].to_numpy(dtype=np.float64)
-    cid_arr = df['cid'].to_numpy()
-    boundaries = np.flatnonzero(np.r_[True, cid_arr[1:] != cid_arr[:-1], True])
-
-    # cohort -> (mature_counts, observed_counts) per grid point
-    acc: dict[int, list[np.ndarray]] = {}
-
-    for b in range(len(boundaries) - 1):
-        lo, hi = boundaries[b], boundaries[b + 1]
-        first_ts = ts_arr[lo]
-        cohort = datetime.fromtimestamp(first_ts).year
-        review_ages = (ts_arr[lo:hi] - first_ts) / 86400.0
-        stabilities = s_arr[lo:hi]
-        card_age = (now_ts - first_ts) / 86400.0
-
-        # Stability step function evaluated on the age grid
-        idx = np.searchsorted(review_ages, age_grid, side='right') - 1
-        observed = (age_grid <= card_age) & (idx >= 0)
-        stab_at_age = np.where(idx >= 0, stabilities[np.clip(idx, 0, None)], 0.0)
-        mature = observed & (stab_at_age >= threshold)
-
-        if cohort not in acc:
-            acc[cohort] = [np.zeros(len(age_grid)), np.zeros(len(age_grid))]
-        acc[cohort][0] += mature
-        acc[cohort][1] += observed
-
-    records = []
-    for cohort in sorted(acc):
-        mature_n, obs_n = acc[cohort]
-        valid = obs_n >= 10  # suppress noisy tails
-        for age, m, n in zip(age_grid[valid], mature_n[valid], obs_n[valid]):
-            records.append({
-                'cohort': cohort,
-                'age_days': age,
-                'pct_mature': m / n * 100,
-                'n': int(n),
-            })
-
-    return pd.DataFrame(records)
-
-
 # =============================================================================
 # MODEL CALIBRATION
 # =============================================================================
@@ -884,19 +781,3 @@ def get_calibration_summary(deck_id: int | None = None) -> dict:
     }
 
 
-def get_known_words_summary(deck_id: int | None = None) -> dict:
-    """Headline stats for the known-words metric."""
-    ts = get_known_words_timeseries(deck_id)
-    if ts.empty:
-        return {'known_now': 0, 'peak': 0, 'peak_date': None, 'delta_30d': 0.0}
-
-    known_now = float(ts['expected_known'].iloc[-1])
-    peak_idx = ts['expected_known'].idxmax()
-    delta_30d = known_now - float(ts['expected_known'].iloc[-31]) if len(ts) > 30 else known_now
-
-    return {
-        'known_now': round(known_now),
-        'peak': round(float(ts.loc[peak_idx, 'expected_known'])),
-        'peak_date': ts.loc[peak_idx, 'date'],
-        'delta_30d': round(delta_30d, 1),
-    }

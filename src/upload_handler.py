@@ -3,18 +3,14 @@ Upload handler for Anki backup files.
 Handles .apkg extraction and .anki21b decompression.
 """
 
+import io
 import os
-import time
 import sqlite3
 import zipfile
 import tempfile
 import shutil
 
-try:
-    import zstandard as zstd
-    ZSTD_AVAILABLE = True
-except ImportError:
-    ZSTD_AVAILABLE = False
+import zstandard as zstd
 
 
 def decompress_anki21b(source_path: str, output_path: str) -> tuple[bool, str]:
@@ -28,34 +24,12 @@ def decompress_anki21b(source_path: str, output_path: str) -> tuple[bool, str]:
     Returns:
         (success: bool, message: str) - Success status and descriptive message
     """
-    if not ZSTD_AVAILABLE:
-        return False, "zstandard library not installed. Run: pip install zstandard"
-
     if not os.path.exists(source_path):
         return False, f"Source file not found: {source_path}"
 
     try:
-        # Read compressed data
-        with open(source_path, 'rb') as f:
-            compressed_data = f.read()
-
-        # Initialize decompressor
-        dctx = zstd.ZstdDecompressor()
-
-        # Decompress with timeout
-        start_time = time.time()
-        with open(output_path, 'wb') as fout:
-            with dctx.stream_reader(compressed_data) as reader:
-                while True:
-                    chunk = reader.read(16384)  # 16KB chunks
-                    if not chunk:
-                        break
-                    fout.write(chunk)
-
-                    # 30 second timeout
-                    if time.time() - start_time > 30:
-                        return False, "Decompression timeout (>30s)"
-
+        with open(source_path, 'rb') as fin, open(output_path, 'wb') as fout:
+            zstd.ZstdDecompressor().copy_stream(fin, fout)
         return True, f"Successfully decompressed to {output_path}"
 
     except zstd.ZstdError as e:
@@ -99,30 +73,6 @@ def validate_database(db_path: str) -> tuple[bool, str]:
         return False, f"Database validation error: {str(e)}"
 
 
-def validate_apkg_contents(extracted_dir: str) -> tuple[bool, str]:
-    """
-    Validate that extracted .apkg contains required files.
-
-    Args:
-        extracted_dir: Directory where .apkg was extracted
-
-    Returns:
-        (success: bool, message: str) - Validation result
-    """
-    required_files = ['collection.anki21b']
-    missing_files = []
-
-    for filename in required_files:
-        file_path = os.path.join(extracted_dir, filename)
-        if not os.path.exists(file_path):
-            missing_files.append(filename)
-
-    if missing_files:
-        return False, f"Missing required files: {', '.join(missing_files)}"
-
-    return True, "All required files present"
-
-
 def process_apkg_upload(file_contents: bytes, data_root: str) -> tuple[bool, str]:
     """
     Process uploaded .apkg file: extract, decompress, validate, write to data/anki.db.
@@ -140,22 +90,14 @@ def process_apkg_upload(file_contents: bytes, data_root: str) -> tuple[bool, str
         # Create temporary directory for extraction
         temp_dir = tempfile.mkdtemp()
 
-        # Write uploaded file to temp location
-        temp_apkg_path = os.path.join(temp_dir, 'upload.apkg')
-        with open(temp_apkg_path, 'wb') as f:
-            f.write(file_contents)
-
-        # Extract ZIP
+        # Extract the collection straight from the uploaded bytes
         try:
-            with zipfile.ZipFile(temp_apkg_path, 'r') as zip_ref:
-                zip_ref.extractall(temp_dir)
+            with zipfile.ZipFile(io.BytesIO(file_contents)) as zf:
+                zf.extract('collection.anki21b', temp_dir)
         except zipfile.BadZipFile:
             return False, "Invalid or corrupted .apkg file"
-
-        # Validate contents
-        valid, msg = validate_apkg_contents(temp_dir)
-        if not valid:
-            return False, msg
+        except KeyError:
+            return False, "Missing required files: collection.anki21b"
 
         # Decompress to a temp file first
         temp_db = os.path.join(temp_dir, 'anki.db')

@@ -316,7 +316,7 @@ def create_main_layout():
                 ], className='top-bar__controls'),
 
                 # Toast status message
-                html.Div(id='upload-status-message', style={'display': 'none'}),
+                html.Div(id='upload-status-message', className='toast-msg', style={'display': 'none'}),
                 dcc.Interval(
                     id='upload-message-interval',
                     interval=2000, n_intervals=0, max_intervals=1, disabled=True,

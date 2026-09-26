@@ -281,43 +281,6 @@ _COHORT_PALETTE = [COLORS['primary'], COLORS['secondary'], COLORS['success'],
                    COLORS['warning'], COLORS['info'], COLORS['danger']]
 
 
-def create_cohort_chart(df):
-    """
-    Share of each introduction-year cohort that is mature (stability above
-    the app's maturity bar) as a function of card age.
-    Input from fsrs_engine.get_cohort_maturity_curves.
-    """
-    if df.empty:
-        return go.Figure()
-
-    fig = go.Figure()
-
-    for cohort in sorted(df['cohort'].unique()):
-        sub = df[df['cohort'] == cohort]
-        color = _COHORT_PALETTE[(int(cohort) - 2020) % len(_COHORT_PALETTE)]
-        fig.add_trace(go.Scatter(
-            x=sub['age_days'],
-            y=sub['pct_mature'],
-            name=str(cohort),
-            mode='lines',
-            line=dict(color=color, width=2),
-            customdata=sub['n'],
-            hovertemplate=(f'{cohort} cohort<br>Age: %{{x:.0f}}d<br>'
-                           'Mature: %{y:.0f}%<br>Cards observed: %{customdata}<extra></extra>'),
-        ))
-
-    fig.update_layout(
-        title='Cohort Maturity (by introduction year)',
-        xaxis_title='Card age (days)',
-        yaxis_title='% mature (stability > 30d)',
-        **DARK_CHART_LAYOUT,
-    )
-    fig.update_xaxes(rangemode='tozero', **DARK_CHART_AXIS)
-    fig.update_yaxes(range=[0, 100], **DARK_CHART_AXIS)
-
-    return fig
-
-
 def create_sim_memorized_chart(df):
     """
     Projected memorized cards (Σ retrievability) over the simulation horizon.
