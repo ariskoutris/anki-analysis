@@ -277,6 +277,8 @@ def create_main_layout():
 
                     # Actions
                     html.Div([
+                        # Last successful Anki sync (populated by callback)
+                        html.Span(id='last-sync-indicator', className='top-bar__label'),
                         html.Button(
                             'Sync',
                             id='sync-from-anki-button',

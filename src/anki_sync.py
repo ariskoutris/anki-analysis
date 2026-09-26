@@ -8,6 +8,8 @@ import platform
 import shutil
 import subprocess
 import hashlib
+import json
+import time
 from pathlib import Path
 from typing import Tuple, List, Optional
 
@@ -175,9 +177,50 @@ def _files_identical(file_a: Path, file_b: Path) -> bool:
     return bool(hash_a and hash_b and hash_a == hash_b)
 
 
+LAST_SYNC_FILE = "last_sync.json"
+
+
+def get_last_sync_time(data_root: str) -> Optional[float]:
+    """
+    Read the timestamp of the last successful Anki sync.
+
+    Returns:
+        Seconds since epoch, or None if no sync has been recorded
+    """
+    try:
+        with open(Path(data_root) / LAST_SYNC_FILE) as f:
+            return float(json.load(f)["timestamp"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
 def sync_from_anki(profile_name: Optional[str], data_root: str) -> Tuple[bool, str]:
     """
     Sync Anki collection from local installation to data/anki.db.
+    Records the time of every successful sync in data/last_sync.json
+    (an unchanged collection counts as success: the snapshot is current).
+
+    Args:
+        profile_name: Name of Anki profile to sync (None for auto-detect)
+        data_root: Root data directory for the dashboard
+
+    Returns:
+        (success: bool, message: str)
+    """
+    success, message = _sync_from_anki(profile_name, data_root)
+    if success:
+        # Best-effort: failing to record the time must not fail the sync
+        try:
+            (Path(data_root) / LAST_SYNC_FILE).write_text(
+                json.dumps({"timestamp": time.time()}))
+        except OSError:
+            pass
+    return success, message
+
+
+def _sync_from_anki(profile_name: Optional[str], data_root: str) -> Tuple[bool, str]:
+    """
+    Copy the Anki collection into data/anki.db (see sync_from_anki).
 
     Args:
         profile_name: Name of Anki profile to sync (None for auto-detect)

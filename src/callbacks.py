@@ -12,7 +12,7 @@ from dash import dcc, html, Input, Output, State, callback, clientside_callback,
 
 from .constants import COLORS
 from .upload_handler import process_apkg_upload
-from .anki_sync import sync_from_anki, get_sync_info
+from .anki_sync import sync_from_anki, get_sync_info, get_last_sync_time
 from .layout import create_stat_item, DEFAULT_GRID_LAYOUT, sanitize_grid_item
 from .charts_session import (
     create_daily_reviews_chart,
@@ -532,6 +532,34 @@ def handle_anki_sync(n_clicks):
             return message, _TOAST_ERROR, False, 0, no_update
     except Exception as e:
         return f"Sync error: {str(e)}", _TOAST_ERROR, False, 0, no_update
+
+
+# ---------------------------------------------------------------------------
+# Callback: Last sync indicator
+# ---------------------------------------------------------------------------
+
+@callback(
+    [Output('last-sync-indicator', 'children'),
+     Output('last-sync-indicator', 'title')],
+    [Input('backup-refresh-token', 'data'),
+     Input('url', 'pathname')],
+)
+def update_last_sync_indicator(_refresh_token, _url):
+    """Show when the last successful Anki sync happened (uploads don't count)."""
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
+    ts = get_last_sync_time(data_dir)
+    if ts is None:
+        return 'Never synced', 'No successful sync from Anki recorded'
+
+    synced = datetime.fromtimestamp(ts)
+    days_ago = (datetime.now().date() - synced.date()).days
+    if days_ago == 0:
+        when = f"today {synced:%H:%M}"
+    elif days_ago == 1:
+        when = f"yesterday {synced:%H:%M}"
+    else:
+        when = f"{synced:%b} {synced.day}"
+    return f"Synced {when}", f"Last successful sync from Anki: {synced:%Y-%m-%d %H:%M}"
 
 
 # ---------------------------------------------------------------------------
