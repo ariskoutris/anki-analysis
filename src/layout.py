@@ -1,5 +1,5 @@
 """
-Layout builders for the Anki Learning Dashboard.
+Layout builders for AnkiDash.
 Single-page dark Grafana-style grid layout.
 """
 
@@ -169,7 +169,7 @@ def create_main_layout():
 
             # ── Top Bar ──
             html.Div([
-                html.Div('Anki Dashboard', className='top-bar__title'),
+                html.Div('AnkiDash', className='top-bar__title'),
 
                 html.Div([
                     # Time range dropdown

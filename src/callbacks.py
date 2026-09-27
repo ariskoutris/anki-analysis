@@ -1,5 +1,5 @@
 """
-Dash callbacks for the Anki Learning Dashboard.
+Dash callbacks for AnkiDash.
 All @callback decorators register against the global Dash app instance.
 """
 

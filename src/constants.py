@@ -1,5 +1,5 @@
 """
-Shared constants for the Anki Learning Dashboard.
+Shared constants for AnkiDash.
 """
 
 # Dark color palette

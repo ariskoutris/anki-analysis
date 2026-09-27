@@ -33,7 +33,7 @@ wheels = [
 ]
 
 [[package]]
-name = "anki-analysis"
+name = "ankidash"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

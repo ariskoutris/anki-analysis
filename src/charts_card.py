@@ -1,5 +1,5 @@
 """
-Card chart builders for the Anki Learning Dashboard.
+Card chart builders for AnkiDash.
 All functions are pure: DataFrame in, Plotly Figure out.
 """
 

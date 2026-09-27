@@ -1,3 +1,3 @@
 """
-Anki Learning Dashboard Package
+AnkiDash Package
 """

@@ -23,8 +23,9 @@ src/
   fsrs_engine.py            – FSRS analytics on Anki's backend (`anki` package) (see below)
 pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly, pywebview, anki); managed with uv
 uv.lock                     – Pinned dependency lockfile
-scripts/install-launcher.sh – Builds ~/Applications/Anki Dashboard.app (macOS) pointing at this checkout
+scripts/install-launcher.sh – Builds ~/Applications/AnkiDash.app (macOS) pointing at this checkout
 assets/icon.png             – 1024px app icon (converted to .icns by the install script)
+scripts/make-icon.py        – Renders assets/icon.png with AppKit
 data/                       – Not tracked. Contains single anki.db snapshot
 ```
 
@@ -221,5 +222,5 @@ uv run python -m src.desktop  # native window, no debug; what the .app launcher 
 
 The `.app` launcher's `Contents/MacOS/launch` runs `uv sync` then `exec`s `.venv/bin/python -m src.desktop`
 (exec, not `uv run`, so the Dock shows the bundle's name/icon). Output goes to
-`~/Library/Logs/anki-dashboard.log`. First launch triggers a macOS privacy prompt for the repo's folder
+`~/Library/Logs/ankidash.log`. First launch triggers a macOS privacy prompt for the repo's folder
 (e.g. ~/Documents); until accepted, the launcher hangs silently on `uv sync`.

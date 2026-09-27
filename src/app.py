@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Interactive Anki Learning Dashboard
+AnkiDash: interactive Anki learning dashboard
 Entry point: creates the Dash app, sets layout, and registers callbacks.
 """
 
@@ -31,7 +31,7 @@ except Exception as e:
 # ---------------------------------------------------------------------------
 app = dash.Dash(
     __name__,
-    title="Anki Learning Dashboard",
+    title="AnkiDash",
     suppress_callback_exceptions=True,
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
 )

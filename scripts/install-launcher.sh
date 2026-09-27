@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# Builds "Anki Dashboard.app" in ~/Applications, pointing at this checkout.
+# Builds "AnkiDash.app" in ~/Applications, pointing at this checkout.
 # Re-run after moving the repo; running it again just rebuilds the app.
 set -euo pipefail
 
-APP_NAME="Anki Dashboard"
-BUNDLE_ID="io.github.ariskoutris.anki-dashboard"
+APP_NAME="AnkiDash"
+BUNDLE_ID="io.github.ariskoutris.ankidash"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 APP="${APP_DIR:-$HOME/Applications}/$APP_NAME.app"
-LOG="$HOME/Library/Logs/anki-dashboard.log"
+LOG="$HOME/Library/Logs/ankidash.log"
 
 [[ "$(uname)" == Darwin ]] || { echo "This launcher is macOS-only." >&2; exit 1; }
 

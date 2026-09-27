@@ -1,5 +1,5 @@
 """
-Session chart builders for the Anki Learning Dashboard.
+Session chart builders for AnkiDash.
 """
 
 import pandas as pd

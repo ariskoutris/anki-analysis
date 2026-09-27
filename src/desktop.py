@@ -20,7 +20,7 @@ import webview
 
 from .constants import COLORS
 
-TITLE = "Anki Learning Dashboard"
+TITLE = "AnkiDash"
 
 LOADING_HTML = f"""
 <html><body style="margin:0;height:100vh;display:flex;flex-direction:column;

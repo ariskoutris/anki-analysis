@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Data Layer for Anki Dashboard
+Data Layer for AnkiDash
 Consolidates all database access, FSRS calculations, and data transformations
 """
 

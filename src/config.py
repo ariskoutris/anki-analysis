@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Configuration module for the Anki dashboard.
+Configuration module for AnkiDash.
 """
 
 import os

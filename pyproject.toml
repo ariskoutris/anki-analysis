@@ -1,5 +1,5 @@
 [project]
-name = "anki-analysis"
+name = "ankidash"
 version = "0.1.0"
 description = "Interactive Plotly Dash dashboard for analysing Anki flashcard reviews on FSRS-enabled decks."
 readme = "README.md"

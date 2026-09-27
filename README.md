@@ -1,4 +1,4 @@
-# Anki Learning Dashboard
+# AnkiDash
 
 An interactive Plotly Dash dashboard for analysing your Anki flashcard reviews on FSRS-enabled decks.
 
@@ -22,8 +22,8 @@ To launch the dashboard like a normal app, in its own window with no terminal or
 ./scripts/install-launcher.sh
 ```
 
-This installs **Anki Dashboard** into `~/Applications`, where Spotlight, Launchpad and the Dock can find it. Opening it syncs from AnkiWeb and shows the dashboard. Closing the window shuts the server down.
+This installs **AnkiDash** into `~/Applications`, where Spotlight, Launchpad and the Dock can find it. Opening it syncs from AnkiWeb and shows the dashboard. Closing the window shuts the server down.
 
 - The app runs this checkout of the repo, so code changes apply on the next launch. Re-run the script if you move the repo folder.
 - On first launch, macOS may ask for permission to access the folder that holds the repo (e.g. Documents). Allow it.
-- Logs: `~/Library/Logs/anki-dashboard.log`. Without the launcher, the same window opens with `uv run python -m src.desktop`.
+- Logs: `~/Library/Logs/ankidash.log`. Without the launcher, the same window opens with `uv run python -m src.desktop`.
