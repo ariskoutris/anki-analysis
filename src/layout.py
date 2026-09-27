@@ -27,17 +27,15 @@ DEFAULT_GRID = [
 ]
 
 
-def segmented_styles(left_active):
-    """Styles for a two-button segmented toggle (left, right)."""
-    base = {'padding': '4px 12px', 'cursor': 'pointer', 'fontSize': '12px',
-            'fontWeight': '500', 'lineHeight': '1.4'}
-    active = {**base, 'border': f'1px solid {COLORS["primary"]}',
-              'backgroundColor': COLORS['primary'], 'color': '#fff'}
-    inactive = {**base, 'border': f'1px solid {COLORS["border"]}',
-                'backgroundColor': COLORS['bg_secondary'], 'color': COLORS['text_secondary']}
-    left, right = (active, inactive) if left_active else (inactive, active)
-    return ({**left, 'borderRadius': '3px 0 0 3px'},
-            {**right, 'borderRadius': '0 3px 3px 0', 'borderLeft': 'none'})
+def _segmented(component_id, options, value=None):
+    """A segmented toggle (radio items styled as joined buttons); remembers its value."""
+    return dcc.RadioItems(
+        id=component_id,
+        options=[{'label': label, 'value': v} for label, v in options],
+        value=value or options[0][1],
+        persistence=True, persistence_type='local',
+        className='segmented',
+    )
 
 
 def _grid_panel(chart_id, width):
@@ -116,13 +114,6 @@ def create_main_layout():
         # Hidden stores
         dcc.Location(id='url', refresh=True),
         dcc.Store(id='backup-refresh-token', data=0, storage_type='memory'),
-        dcc.Store(id='xaxis-mode', data='dates', storage_type='local'),
-        dcc.Store(id='load-basis', data='interval', storage_type='local'),
-        dcc.Store(id='ui-store', storage_type='local', data={
-            'session_time_range': 'all',
-            'xaxis_mode': 'dates',
-            'deck_filter': 'all',
-        }),
 
         html.Div([
             # ── Top Bar ──
@@ -133,32 +124,26 @@ def create_main_layout():
                     # Time range toggle
                     html.Div([
                         html.Span('Range', className='top-bar__label'),
-                        dcc.RadioItems(
-                            id='session-time-range',
-                            options=[{'label': lbl, 'value': v} for lbl, v in [
-                                ('7d', '7'), ('30d', '30'), ('90d', '90'),
-                                ('180d', '180'), ('1y', '365'), ('All', 'all'),
-                            ]],
-                            value='all',
-                            className='segmented',
-                        ),
+                        _segmented('session-time-range', [
+                            ('7d', '7'), ('30d', '30'), ('90d', '90'),
+                            ('180d', '180'), ('1y', '365'), ('All', 'all'),
+                        ], value='all'),
                     ], className='top-bar__group'),
+
+                    html.Div(className='top-bar__separator'),
 
                     # X-axis toggle
                     html.Div([
-                        html.Button('Dates', id='xaxis-dates-btn', n_clicks=0, style=segmented_styles(True)[0]),
-                        html.Button('Sessions', id='xaxis-sessions-btn', n_clicks=0, style=segmented_styles(True)[1]),
-                    ], style={'display': 'flex'}),
+                        html.Span('X-axis', className='top-bar__label'),
+                        _segmented('xaxis-mode', [('Dates', 'dates'), ('Sessions', 'sessions')]),
+                    ], className='top-bar__group'),
 
                     html.Div(className='top-bar__separator'),
 
                     # Load basis toggle (interval vs stability)
                     html.Div([
                         html.Span('Load', className='top-bar__label'),
-                        html.Div([
-                            html.Button('Interval', id='load-interval-btn', n_clicks=0, style=segmented_styles(True)[0]),
-                            html.Button('Stability', id='load-stability-btn', n_clicks=0, style=segmented_styles(True)[1]),
-                        ], style={'display': 'flex'}),
+                        _segmented('load-basis', [('Interval', 'interval'), ('Stability', 'stability')]),
                     ], className='top-bar__group'),
 
                     html.Div(className='top-bar__separator'),
@@ -173,47 +158,25 @@ def create_main_layout():
                                 for d in get_deck_list()
                             ],
                             value='all',
+                            persistence=True, persistence_type='local',
                             clearable=False,
                             style={'width': '200px'},
                         ),
                     ], className='top-bar__group'),
 
+                    html.Div(className='top-bar__separator'),
+
                     # Actions
                     html.Div([
                         # Last successful AnkiWeb sync (populated by callback)
                         html.Span(id='last-sync-indicator', className='top-bar__label'),
-                        html.Button(
-                            'Sync',
-                            id='sync-from-anki-button',
-                            title='Sync from AnkiWeb',
-                            style={
-                                'padding': '4px 12px',
-                                'backgroundColor': COLORS['success'],
-                                'color': '#fff',
-                                'border': 'none',
-                                'borderRadius': '3px',
-                                'cursor': 'pointer',
-                                'fontSize': '12px',
-                                'fontWeight': '500',
-                            },
-                        ),
+                        html.Button('Sync', id='sync-from-anki-button', title='Sync from AnkiWeb',
+                                    className='top-bar__btn top-bar__btn--sync'),
                         dcc.Upload(
                             id='upload-backup-button',
                             accept='.apkg',
-                            children=html.Button(
-                                'Upload',
-                                title='Upload .apkg file',
-                                style={
-                                    'padding': '4px 12px',
-                                    'backgroundColor': COLORS['primary'],
-                                    'color': '#fff',
-                                    'border': 'none',
-                                    'borderRadius': '3px',
-                                    'cursor': 'pointer',
-                                    'fontSize': '12px',
-                                    'fontWeight': '500',
-                                },
-                            ),
+                            children=html.Button('Upload', title='Upload .apkg file',
+                                                 className='top-bar__btn top-bar__btn--upload'),
                         ),
                     ], className='top-bar__actions'),
                 ], className='top-bar__controls'),

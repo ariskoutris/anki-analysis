@@ -123,10 +123,11 @@ INDEX_STRING = '''
                 gap: 6px;
             }
 
-            /* Segmented radio (Range) */
+            /* Top-bar controls share one height (27px): 12px/17px text,
+               4px vertical padding, 1px border */
             .segmented { display: flex; }
             .segmented label {
-                padding: 4px 10px; font-size: 12px; font-weight: 500; line-height: 1.4;
+                padding: 4px 10px; font-size: 12px; font-weight: 500; line-height: 17px;
                 cursor: pointer; color: #8b8fa3; background: #181b23;
                 border: 1px solid #2a2d3a; border-left: none;
             }
@@ -137,6 +138,14 @@ INDEX_STRING = '''
             .segmented label:has(input:checked) {
                 color: #fff; background: #5b8dff; border-color: #5b8dff;
             }
+            .top-bar__btn {
+                font: inherit; font-size: 12px; font-weight: 500; line-height: 17px;
+                padding: 4px 12px; border: 1px solid transparent; border-radius: 3px;
+                color: #fff; cursor: pointer;
+            }
+            .top-bar__btn:hover { filter: brightness(1.1); }
+            .top-bar__btn--sync { background: #2dd4a8; }
+            .top-bar__btn--upload { background: #5b8dff; }
 
             /* Stat strip */
             .stat-strip {
@@ -303,10 +312,11 @@ INDEX_STRING = '''
                 border-color: #5b8dff !important;
             }
             .top-bar button.dash-dropdown {
-                min-height: 26px !important;
-                height: 26px !important;
+                min-height: 27px !important;
+                height: 27px !important;
                 padding: 0 !important;
                 font-size: 12px !important;
+                font-weight: 500 !important;
             }
             .top-bar .dash-dropdown-trigger {
                 min-height: 0 !important;

@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, ctx, no_update
+from dash import Input, Output, State, callback, no_update
 
 from .config import DATA_DIR
 from .constants import COLORS, DARK_CHART_LAYOUT
@@ -18,7 +18,7 @@ from .upload_handler import process_apkg_upload
 from anki.errors import SyncError
 
 from .anki_sync import sync_from_ankiweb, login, is_logged_in, get_last_sync_time
-from .layout import create_stat_item, segmented_styles
+from .layout import create_stat_item
 from .charts_session import (
     create_daily_reviews_chart,
     create_hourly_chart,
@@ -120,7 +120,7 @@ _EMPTY_FIG = go.Figure(layout=dict(
     [Input('backup-refresh-token', 'data'),
      Input('url', 'pathname'),
      Input('deck-filter', 'value'),
-     Input('load-basis', 'data')],
+     Input('load-basis', 'value')],
     prevent_initial_call=False
 )
 def update_overview_container(_refresh_token, _url, deck_value, load_basis):
@@ -173,100 +173,6 @@ def update_overview_container(_refresh_token, _url, deck_value, load_basis):
 
     return (upcoming, streak, recall, true_retention, overdue, total_reviews, total_hours,
             days_active, cards_learned, avg_ret, daily_load)
-
-
-# ---------------------------------------------------------------------------
-# Callback: Load UI from localStorage
-# ---------------------------------------------------------------------------
-
-@callback(
-    [
-        Output('session-time-range', 'value'),
-        Output('deck-filter', 'value')
-    ],
-    [Input('url', 'pathname')],
-    [State('ui-store', 'data')],
-    prevent_initial_call=False
-)
-def load_ui_from_store(_, ui_store):
-    """Load UI preferences from local storage on page load."""
-    ui_store = ui_store or {}
-    return ui_store.get('session_time_range', 'all'), ui_store.get('deck_filter', 'all')
-
-
-# ---------------------------------------------------------------------------
-# Callback: Toggle x-axis mode (dark button styles)
-# ---------------------------------------------------------------------------
-
-@callback(
-    [Output('xaxis-mode', 'data'),
-     Output('xaxis-dates-btn', 'style'),
-     Output('xaxis-sessions-btn', 'style')],
-    [Input('xaxis-dates-btn', 'n_clicks'),
-     Input('xaxis-sessions-btn', 'n_clicks'),
-     Input('url', 'pathname')],
-    [State('ui-store', 'data')],
-    prevent_initial_call=False
-)
-def toggle_xaxis_mode(dates_clicks, sessions_clicks, _, ui_store):
-    """Toggle between dates and sessions x-axis mode."""
-    triggered = ctx.triggered_id
-
-    if triggered == 'url' or not triggered:
-        mode = (ui_store or {}).get('xaxis_mode', 'dates')
-    elif triggered == 'xaxis-dates-btn':
-        mode = 'dates'
-    else:
-        mode = 'sessions'
-
-    return (mode, *segmented_styles(mode == 'dates'))
-
-
-@callback(
-    [Output('load-basis', 'data'),
-     Output('load-interval-btn', 'style'),
-     Output('load-stability-btn', 'style')],
-    [Input('load-interval-btn', 'n_clicks'),
-     Input('load-stability-btn', 'n_clicks'),
-     Input('url', 'pathname')],
-    [State('ui-store', 'data')],
-    prevent_initial_call=False
-)
-def toggle_load_basis(_interval_clicks, _stability_clicks, _, ui_store):
-    """Toggle load computations between stored intervals and stability."""
-    triggered = ctx.triggered_id
-    if triggered == 'url' or not triggered:
-        basis = (ui_store or {}).get('load_basis', 'interval')
-    elif triggered == 'load-stability-btn':
-        basis = 'stability'
-    else:
-        basis = 'interval'
-
-    return (basis, *segmented_styles(basis == 'interval'))
-
-
-# ---------------------------------------------------------------------------
-# Callback: Save UI preferences
-# ---------------------------------------------------------------------------
-
-@callback(
-    Output('ui-store', 'data'),
-    [
-        Input('session-time-range', 'value'),
-        Input('xaxis-mode', 'data'),
-        Input('deck-filter', 'value'),
-        Input('load-basis', 'data')
-    ],
-    prevent_initial_call=False
-)
-def save_ui_to_store(session_value, xaxis_value, deck_value, load_basis):
-    """Persist UI preferences to local storage."""
-    return {
-        'session_time_range': session_value or 'all',
-        'xaxis_mode': xaxis_value or 'dates',
-        'deck_filter': deck_value or 'all',
-        'load_basis': load_basis or 'interval',
-    }
 
 
 # ---------------------------------------------------------------------------
@@ -474,7 +380,7 @@ def run_forecast_simulation(_n, days, retention, new_per_day, max_reviews, deck_
         Output('chart-future-load', 'figure'),
     ],
     [Input('session-time-range', 'value'),
-     Input('xaxis-mode', 'data'),
+     Input('xaxis-mode', 'value'),
      Input('backup-refresh-token', 'data'),
      Input('deck-filter', 'value')],
     prevent_initial_call=False
@@ -523,8 +429,8 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value):
     [Input('backup-refresh-token', 'data'),
      Input('deck-filter', 'value'),
      Input('session-time-range', 'value'),
-     Input('xaxis-mode', 'data'),
-     Input('load-basis', 'data')],
+     Input('xaxis-mode', 'value'),
+     Input('load-basis', 'value')],
     prevent_initial_call=False
 )
 def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode, load_basis):

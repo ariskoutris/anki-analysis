@@ -145,6 +145,7 @@ Layout builders:
 - `create_section_container(title, description, content_id, summary_id)` – section wrapper with header and optional summary area
 - `create_session_tab()` – session tab layout with 3 sections (volume, effectiveness, workload)
 - `create_cards_tab()` – card tab layout with 3 sections (knowledge, maturity, problems)
+- `_segmented(id, options)` – top-bar toggle (Range, X-axis, Load): `dcc.RadioItems` styled by the `.segmented` CSS class, value remembered via Dash `persistence` (deck dropdown too); no callbacks needed
 - `create_main_layout()` – assembles the full page layout (top bar includes the `last-sync-indicator` span next to Sync/Upload, plus the hidden `ankiweb-login` panel)
 
 ### charts_session.py
@@ -165,9 +166,6 @@ All `@callback` functions + `parse_time_range` utility:
 | Callback | Trigger | Output |
 |----------|---------|--------|
 | `update_overview_container` | `backup-refresh-token` / `url` | Overview stat cards |
-| `load_ui_from_store` | `url` (page load) | Restores filter values from localStorage |
-| `toggle_xaxis_mode` | x-axis buttons / `url` | Toggles dates ↔ sessions mode |
-| `save_ui_to_store` | any filter change | Persists preferences to localStorage |
 | `handle_backup_upload` | upload button | Processes .apkg uploads → data/anki.db |
 | `handle_anki_sync` | sync button | Syncs from AnkiWeb → data/anki.db; toggles the login panel when not logged in |
 | `handle_ankiweb_login` | login button / Enter in password | Stores AnkiWeb sync key, then syncs |
