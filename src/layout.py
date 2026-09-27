@@ -125,13 +125,13 @@ def create_simulator_section():
     ], className='sim-section')
 
 
-def create_stat_item(value, label, color=COLORS['text_primary'], secondary=False):
+def create_stat_item(value, label, color=COLORS['text_primary'], secondary=False, title=None):
     """Create a compact stat indicator for the stat strip."""
     cls = 'stat-item stat-item--secondary' if secondary else 'stat-item'
     return html.Div([
         html.Div(value, className='stat-item__value', style={'color': color}),
         html.Div(label, className='stat-item__label'),
-    ], className=cls)
+    ], className=cls, title=title)
 
 
 def create_main_layout():
@@ -342,6 +342,7 @@ def create_main_layout():
                 html.Div(id='stat-upcoming'),
                 html.Div(id='stat-streak'),
                 html.Div(id='stat-recall-rate'),
+                html.Div(id='stat-true-retention'),
                 html.Div(id='stat-overdue'),
 
                 html.Div(className='stat-strip__separator'),

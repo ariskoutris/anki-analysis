@@ -223,6 +223,22 @@ def get_known_words_timeseries(deck_id: int | None = None) -> pd.DataFrame:
     return result
 
 
+def get_true_retention(deck_id: int | None = None) -> dict:
+    """
+    Anki's true retention (Stats screen): % of reviews of review cards that
+    were passed, for the last week/month/year. None when a period has none.
+    """
+    with open_collection() as col:
+        tr = col._backend.graphs(search=_search(deck_id), days=365).true_retention
+    out = {}
+    for period in ('week', 'month', 'year'):
+        p = getattr(tr, period)
+        passed = p.young_passed + p.mature_passed
+        total = passed + p.young_failed + p.mature_failed
+        out[period] = passed / total * 100 if total else None
+    return out
+
+
 # =============================================================================
 # PLANNING: RETENTION <-> WORKLOAD, FORWARD SIMULATION
 # =============================================================================

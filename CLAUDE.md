@@ -119,6 +119,8 @@ runs callbacks in parallel); plain sqlite3 reads keep working alongside it.
 - `get_retention_workload_curve` – Anki's `get_retention_workload` (deck
   options' "help me decide"): review time cost at 70–99% retention incl.
   relearning, shown relative to the current setting (1×)
+- `get_true_retention` – Anki's true retention (Stats screen) for week/month/year via `graphs()`;
+  30-day value in the stat strip, week/month/year in its tooltip
 - `get_fatigue_curve` – accuracy/answer-time vs within-session position
   (sessions split on >30 min gaps)
 - `simulate_future` – Anki's FSRS simulator (`simulate_fsrs_review`),

@@ -61,6 +61,7 @@ from .fsrs_engine import (
     get_retention_workload_curve,
     get_fatigue_curve,
     simulate_future,
+    get_true_retention,
     get_deck_sim_defaults,
 )
 
@@ -111,6 +112,7 @@ _EMPTY_FIG = go.Figure(layout=dict(
         Output('stat-upcoming', 'children'),
         Output('stat-streak', 'children'),
         Output('stat-recall-rate', 'children'),
+        Output('stat-true-retention', 'children'),
         Output('stat-overdue', 'children'),
         Output('stat-total-reviews', 'children'),
         Output('stat-total-hours', 'children'),
@@ -142,6 +144,15 @@ def update_overview_container(_refresh_token, _url, deck_value, load_basis):
     recall = create_stat_item(
         f"{session_stats['avg_success_rate']:.0f}%", 'Recall Rate',
         COLORS['success'] if session_stats['avg_success_rate'] >= 85 else COLORS['warning'])
+    true_ret = get_true_retention(deck_id=deck_id)
+    fmt = lambda v: '—' if v is None else f"{v:.0f}%"
+    true_retention = create_stat_item(
+        fmt(true_ret['month']), 'True Ret. 30d',
+        COLORS['text_muted'] if true_ret['month'] is None
+        else COLORS['success'] if true_ret['month'] >= 85 else COLORS['warning'],
+        title=(f"Anki's true retention (review cards, pass = Hard/Good/Easy)\n"
+               f"Week {fmt(true_ret['week'])} · Month {fmt(true_ret['month'])} · "
+               f"Year {fmt(true_ret['year'])}"))
     overdue = create_stat_item(
         f"{workload['overdue_cards']}", 'Overdue',
         COLORS['danger'] if workload['overdue_cards'] > 0 else COLORS['success'])
@@ -163,7 +174,7 @@ def update_overview_container(_refresh_token, _url, deck_value, load_basis):
         f"{calculate_daily_load(deck_id=deck_id, use_stability=use_stability):.1f}",
         'Daily Load', COLORS['text_secondary'], secondary=True)
 
-    return (upcoming, streak, recall, overdue, total_reviews, total_hours,
+    return (upcoming, streak, recall, true_retention, overdue, total_reviews, total_hours,
             days_active, cards_learned, avg_ret, daily_load)
 
 
