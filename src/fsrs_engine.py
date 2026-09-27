@@ -9,40 +9,22 @@ known-words series, calibration, fatigue. Replay results are cached per
 """
 
 import os
-import threading
-from contextlib import contextmanager
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from anki.collection import Collection
 from anki.scheduler_pb2 import SimulateFsrsReviewRequest
 
 from .config import get_db_path
-from .data_loader import connect_db, build_deck_filter, DEFAULT_DECAY
+from .data_loader import connect_db, build_deck_filter, deck_search, open_collection
 
 
 # =============================================================================
-# ANKI COLLECTION + DECK PRESETS
+# DECK PRESETS
 # =============================================================================
 
-# Anki's backend fails with DBError when two threads open the collection at
-# once, and Dash runs callbacks concurrently
-_collection_lock = threading.Lock()
-
-
-@contextmanager
-def open_collection():
-    """Open data/anki.db with Anki's backend (never creates an empty one)."""
-    path = get_db_path()
-    if not os.path.exists(path):
-        raise FileNotFoundError(path)
-    with _collection_lock:
-        col = Collection(path)
-        try:
-            yield col
-        finally:
-            col.close()
+# FSRS-6 default decay (-w20), for presets without optimized params
+DEFAULT_DECAY = -0.1542
 
 
 def _fsrs_params(conf: dict) -> list[float]:
@@ -81,10 +63,6 @@ def _main_config(col, deck_id: int | None) -> dict:
         deck_id = col.db.scalar(
             "SELECT did FROM cards WHERE queue = 2 GROUP BY did ORDER BY COUNT(*) DESC LIMIT 1") or 1
     return col.decks.config_dict_for_deck_id(deck_id)
-
-
-def _search(deck_id: int | None) -> str:
-    return f'did:{int(deck_id)}' if deck_id is not None else ''
 
 
 # =============================================================================
@@ -229,7 +207,7 @@ def get_true_retention(deck_id: int | None = None) -> dict:
     were passed, for the last week/month/year. None when a period has none.
     """
     with open_collection() as col:
-        tr = col._backend.graphs(search=_search(deck_id), days=365).true_retention
+        tr = col._backend.graphs(search=deck_search(deck_id), days=365).true_retention
     out = {}
     for period in ('week', 'month', 'year'):
         p = getattr(tr, period)
@@ -256,7 +234,7 @@ def get_retention_workload_curve(deck_id: int | None = None) -> dict:
     """
     with open_collection() as col:
         conf = _main_config(col, deck_id)
-        costs = col._backend.get_retention_workload(w=_fsrs_params(conf), search=_search(deck_id))
+        costs = col._backend.get_retention_workload(w=_fsrs_params(conf), search=deck_search(deck_id))
     current = float(conf.get('desiredRetention', 0.9))
     if not costs:
         return {'curve': pd.DataFrame(columns=['retention', 'relative_workload']),
@@ -313,7 +291,7 @@ def simulate_future(
             new_limit=new_per_day,
             review_limit=max_reviews,
             max_interval=conf['rev']['maxIvl'],
-            search=_search(deck_id),
+            search=deck_search(deck_id),
             new_cards_ignore_review_limit=col.get_config('newCardsIgnoreReviewLimit', False),
             easy_days_percentages=conf.get('easyDaysPercentages', []),
             review_order=conf.get('reviewOrder', 0),

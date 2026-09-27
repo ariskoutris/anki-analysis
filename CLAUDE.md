@@ -70,7 +70,7 @@ Simple path helpers. Key exports:
 
 ### data_loader.py
 
-Pure data layer. Every public function opens its own `sqlite3` connection via `connect_db()` → `get_db_path()`. No caching across requests (each callback gets fresh data).
+Data layer. Plain SQL goes through `connect_db()` (sqlite3); anything Anki computes (FSRS retrievability, future-due counts, rollover, deck names) goes through `open_collection()`, which opens data/anki.db as an Anki `Collection` under a lock (the backend raises DBError on concurrent opens; Dash runs callbacks in parallel). `deck_search(deck_id)` is the Anki-search twin of `build_deck_filter`. No caching across requests.
 
 **Session-level queries** (all accept `review_days`):
 - `get_session_data()` – per-day session stats (cards, success rate, timing)
@@ -78,17 +78,17 @@ Pure data layer. Every public function opens its own `sqlite3` connection via `c
 - `get_daily_reviews()` – daily review counts
 
 **Card-level queries:**
-- `get_card_data()` – learning/review cards: stability, difficulty, retrievability (from `cards.data` `s`/`d`/`lrt` + deck decay), days overdue, suspended flag
+- `get_card_data()` – learning/review cards: stability, difficulty, retrievability via Anki's SQL functions (`extract_fsrs_variable`, `extract_fsrs_retrievability`; values rounded back from float32)
 
 **Summaries:**
 - `get_overview_stats()` – review cards, review count, total hours, days studied
 - `calculate_daily_load()` – Σ(1/stability) for review cards
-- `get_future_load_forecast(days_ahead)` – due card counts per day
+- `get_future_load_forecast(days_ahead)` – due counts per day from Anki's `graphs().future_due` (day 0 = Anki's today)
 
 **Section summary functions:**
 - `get_current_streak()` – consecutive study days (Anki rollover hour)
 - `get_session_summary_stats()` – current streak + avg recall rate (stat strip)
-- `get_workload_summary()` – due this week, overdue cards
+- `get_workload_summary()` – due this week (today included), overdue cards, both from `future_due`
 **Key SQL conventions:**
 - `r.type != 4` excludes manual reschedules
 - `c.queue != -1` excludes suspended cards
@@ -99,9 +99,8 @@ Pure data layer. Every public function opens its own `sqlite3` connection via `c
 
 FSRS analytics layer. Memory states, presets, the simulator and the workload
 estimate all come from Anki's own backend via the `anki` package, so they match
-what Anki schedules with. `open_collection()` opens data/anki.db as an Anki
-`Collection` under a lock (the backend raises DBError on concurrent opens; Dash
-runs callbacks in parallel); plain sqlite3 reads keep working alongside it.
+what Anki schedules with. `open_collection()` (in data_loader) opens data/anki.db as an Anki `Collection`;
+plain sqlite3 reads keep working alongside it.
 
 - `get_deck_fsrs_configs()` – deck_id → decay/desired retention/daily
   limits from `col.decks.config_dict_for_deck_id` (17/19-param sets migrated
@@ -208,7 +207,7 @@ Charts support a date/session x-axis toggle. In session mode, sequential indices
 ## Conventions
 
 - FSRS params live in `cards.data` as JSON: `{"s": stability, "d": difficulty, "lrt": last_review_timestamp_sec, ...}`
-- Retrievability formula: FSRS-6 curve with each deck's decay (`calculate_retrievability`); matches Anki's own value
+- Retrievability: Anki's own `extract_fsrs_retrievability` (card snapshot) / FSRS-6 curve with each deck's decay (replay)
 - All SQL filters are built via `build_time_filter()` which returns a SQL fragment
 - Charts use a shared `COLORS` dict and `DARK_CHART_LAYOUT` for consistent styling (defined in `constants.py`)
 - All modules use relative imports (`from .constants import COLORS`); run via `uv run python -m src.app`

@@ -4,11 +4,16 @@ Data Layer for Anki Dashboard
 Consolidates all database access, FSRS calculations, and data transformations
 """
 
+import os
 import sqlite3
-import pandas as pd
-import numpy as np
-import json
+import threading
+import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
+
+import numpy as np
+import pandas as pd
+from anki.collection import Collection
 
 from src.config import get_db_path
 
@@ -18,54 +23,38 @@ def connect_db():
     return sqlite3.connect(get_db_path())
 
 
-# FSRS-6 default decay (-w20), for presets without optimized params
-DEFAULT_DECAY = -0.1542
+# Anki's backend fails with DBError when two threads open the collection at
+# once, and Dash runs callbacks concurrently
+_collection_lock = threading.Lock()
 
 
-def calculate_retrievability(stability: float, days_since_review: float,
-                             decay: float = DEFAULT_DECAY) -> float:
-    """
-    FSRS-6 forgetting curve: R = (1 + factor * t / S) ** decay,
-    factor = 0.9 ** (1 / decay) - 1 (so R = 0.9 when t = S).
-    """
-    if stability <= 0 or days_since_review < 0:
-        return 0.0
-    factor = 0.9 ** (1.0 / decay) - 1.0
-    return (1.0 + factor * days_since_review / stability) ** decay
+@contextmanager
+def open_collection():
+    """Open data/anki.db with Anki's backend (never creates an empty one)."""
+    path = get_db_path()
+    if not os.path.exists(path):
+        raise FileNotFoundError(path)
+    with _collection_lock:
+        col = Collection(path)
+        try:
+            yield col
+        finally:
+            col.close()
 
 
-def parse_fsrs_data(data_json: str) -> dict | None:
-    """Parse FSRS JSON data from cards"""
-    if not data_json:
-        return None
-    try:
-        return json.loads(data_json)
-    except (json.JSONDecodeError, TypeError):
-        return None
-
-
-def get_collection_start_date() -> datetime:
-    """Get collection creation date from database"""
-    conn = connect_db()
-    cursor = conn.cursor()
-    cursor.execute('SELECT crt FROM col')
-    collection_timestamp = cursor.fetchone()[0]
-    conn.close()
-    return datetime.fromtimestamp(collection_timestamp)
+def deck_search(deck_id: int | None) -> str:
+    """Anki search matching build_deck_filter (the deck itself, no subdecks)."""
+    return f'did:{int(deck_id)}' if deck_id is not None else ''
 
 
 def get_deck_list() -> list[dict]:
-    """Get list of all decks from the database."""
-    conn = connect_db()
-    cursor = conn.cursor()
-    cursor.execute('SELECT id, name FROM decks')
-    decks = [
-        {'id': row[0], 'name': row[1].replace('\x1f', '::')}
-        for row in cursor.fetchall()
-    ]
-    conn.close()
-    decks.sort(key=lambda d: d['name'].lower())
-    return decks
+    """All decks (full '::' names), sorted by name; [] before the first sync."""
+    try:
+        with open_collection() as col:
+            decks = [{'id': d.id, 'name': d.name} for d in col.decks.all_names_and_ids()]
+    except FileNotFoundError:
+        return []
+    return sorted(decks, key=lambda d: d['name'].lower())
 
 
 def build_deck_filter(deck_id: int | None = None) -> str:
@@ -212,43 +201,22 @@ def get_daily_reviews(review_days: int | None = None, deck_id: int | None = None
 def get_card_data(deck_id: int | None = None) -> pd.DataFrame:
     """
     Learning/review cards (suspended included, matching Anki) with FSRS
-    memory state from cards.data. Returns DataFrame[stability, difficulty,
-    retrievability (%), days_overdue, is_suspended].
+    memory state, read with Anki's own SQL functions so retrievability uses
+    each preset's forgetting curve and Anki's day boundaries.
+    Returns DataFrame[stability, difficulty, retrievability (%)].
     """
-    from .fsrs_engine import get_deck_fsrs_configs
-    deck_configs = get_deck_fsrs_configs()
-
-    conn = connect_db()
-    rows = conn.execute(f"""
-        SELECT c.data, c.queue, c.due, CASE WHEN c.odid THEN c.odid ELSE c.did END
-        FROM cards c
-        WHERE c.data IS NOT NULL
-          AND c.data != ""
-          AND c.type IN (1, 2)
-          {build_deck_filter(deck_id)}
-    """).fetchall()
-    conn.close()
-
-    now = datetime.now()
-    collection_start = get_collection_start_date()
-    records = []
-    for data_json, queue, due, home_did in rows:
-        fsrs = parse_fsrs_data(data_json)
-        if not (fsrs and 's' in fsrs and 'd' in fsrs):
-            continue
-        lrt = fsrs.get('lrt', 0)
-        days_since_review = (now.timestamp() - lrt) / 86400 if lrt > 0 else 0
-        decay = deck_configs.get(home_did, {}).get('decay', DEFAULT_DECAY)
-        records.append((
-            float(fsrs['s']),
-            float(fsrs['d']),
-            calculate_retrievability(fsrs['s'], days_since_review, decay) * 100,
-            (now - (collection_start + timedelta(days=due))).days,
-            queue == -1,
-        ))
-
-    return pd.DataFrame(records, columns=[
-        'stability', 'difficulty', 'retrievability', 'days_overdue', 'is_suspended'])
+    with open_collection() as col:
+        rows = col.db.all(f"""
+            SELECT round(extract_fsrs_variable(c.data, 's'), 4),  -- undo float32 widening
+                   round(extract_fsrs_variable(c.data, 'd'), 3),
+                   100 * extract_fsrs_retrievability(
+                       c.data, CASE WHEN c.odue != 0 THEN c.odue ELSE c.due END, c.ivl, ?, ?, ?)
+            FROM cards c
+            WHERE c.type IN (1, 2)
+              AND extract_fsrs_variable(c.data, 's') IS NOT NULL
+              {build_deck_filter(deck_id)}
+        """, col.sched.today, col.sched.day_cutoff, int(time.time()))
+    return pd.DataFrame(rows, columns=['stability', 'difficulty', 'retrievability'])
 
 
 # =============================================================================
@@ -290,12 +258,11 @@ def get_card_load(deck_id: int | None = None, use_stability: bool = False,
 
     Returns DataFrame[did, ivl, lapses, contrib] (+ intro_date if with_intro).
     """
-    conn = connect_db()
     deck_filter = build_deck_filter(deck_id)
     if with_intro:
         query = f"""
-            SELECT c.did AS did, c.ivl AS ivl, c.lapses AS lapses, c.data AS data,
-                   MIN(r.id) / 1000 AS first_ts
+            SELECT c.did, c.ivl, c.lapses, round(extract_fsrs_variable(c.data, 's'), 4),
+                   MIN(r.id) / 1000
             FROM cards c
             JOIN revlog r ON r.cid = c.id
             WHERE c.queue = 2 AND c.ivl > 0 AND c.odid = 0
@@ -305,13 +272,14 @@ def get_card_load(deck_id: int | None = None, use_stability: bool = False,
         """
     else:
         query = f"""
-            SELECT c.did AS did, c.ivl AS ivl, c.lapses AS lapses, c.data AS data
+            SELECT c.did, c.ivl, c.lapses, round(extract_fsrs_variable(c.data, 's'), 4)
             FROM cards c
             WHERE c.queue = 2 AND c.ivl > 0 AND c.odid = 0
               {deck_filter}
         """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
+    with open_collection() as col:
+        df = pd.DataFrame(col.db.all(query), columns=['did', 'ivl', 'lapses', 's']
+                          + (['first_ts'] if with_intro else []))
 
     if df.empty:
         cols = ['did', 'ivl', 'lapses', 'contrib'] + (['intro_date'] if with_intro else [])
@@ -319,7 +287,7 @@ def get_card_load(deck_id: int | None = None, use_stability: bool = False,
 
     ivl_contrib = 1.0 / df['ivl'].clip(lower=1)
     if use_stability:
-        from .fsrs_engine import get_deck_fsrs_configs
+        from .fsrs_engine import get_deck_fsrs_configs, DEFAULT_DECAY
         cfgs = get_deck_fsrs_configs()
 
         def decay_of(did):
@@ -328,9 +296,7 @@ def get_card_load(deck_id: int | None = None, use_stability: bool = False,
         def rd_of(did):
             return (cfgs.get(did) or {}).get('desired_retention', 0.9)
 
-        s = pd.to_numeric(
-            df['data'].apply(lambda j: (parse_fsrs_data(j) or {}).get('s')),
-            errors='coerce').to_numpy(dtype=float)
+        s = pd.to_numeric(df['s'], errors='coerce').to_numpy(dtype=float)
         decay = df['did'].map(decay_of).to_numpy(dtype=float)
         r_d = df['did'].map(rd_of).to_numpy(dtype=float)
         factor = 0.9 ** (1.0 / decay) - 1.0
@@ -523,18 +489,10 @@ def get_lapse_load(deck_id: int | None = None,
             .reset_index().sort_values('lapses').reset_index(drop=True))
 
 
-def get_rollover_hour(default: int = 4) -> int:
+def get_rollover_hour() -> int:
     """Anki's day-rollover hour (reviews before it belong to the previous day)."""
-    try:
-        conn = connect_db()
-        row = conn.execute("SELECT val FROM config WHERE key = 'rollover'").fetchone()
-        conn.close()
-        if row and row[0] is not None:
-            val = row[0].decode() if isinstance(row[0], bytes) else row[0]
-            return int(val)
-    except Exception:
-        pass
-    return default
+    with open_collection() as col:
+        return int(col.get_config('rollover', 4))
 
 
 def get_current_streak(deck_id: int | None = None) -> int:
@@ -568,14 +526,18 @@ def get_current_streak(deck_id: int | None = None) -> int:
     return streak
 
 
+def _future_due(deck_id: int | None) -> dict[int, int]:
+    """Anki's future-due counts: days from Anki's today -> cards (negative = overdue)."""
+    with open_collection() as col:
+        return dict(col._backend.graphs(search=deck_search(deck_id), days=1).future_due.future_due)
+
+
 def get_workload_summary(deck_id: int | None = None) -> dict:
-    """Cards due in the next 7 days and overdue (non-suspended) cards."""
-    forecast_df = get_future_load_forecast(7, deck_id=deck_id)
-    cards_df = get_card_data(deck_id=deck_id)
-    active = cards_df[~cards_df['is_suspended']]
+    """Cards due in the next 7 days (today included) and overdue cards."""
+    due = _future_due(deck_id)
     return {
-        'due_this_week': int(forecast_df['due_count'].sum()),
-        'overdue_cards': int((active['days_overdue'] > 0).sum()),
+        'due_this_week': sum(n for day, n in due.items() if 0 <= day < 7),
+        'overdue_cards': sum(n for day, n in due.items() if day < 0),
     }
 
 
@@ -590,31 +552,16 @@ def get_session_summary_stats(deck_id: int | None = None) -> dict:
 
 def get_future_load_forecast(days_ahead: int = 60, deck_id: int | None = None) -> pd.DataFrame:
     """
-    Cards due on each of the next `days_ahead` days (learning + review).
+    Cards due on each of the next `days_ahead` days (day 0 = Anki's today,
+    learning cards included), from Anki's future-due graph.
 
     Returns DataFrame with columns: date, due_count, ma7 (7-day moving average)
     """
-    conn = connect_db()
-    df = pd.read_sql_query(f"""
-        SELECT c.due, c.queue
-        FROM cards c
-        WHERE c.queue IN (1, 2)  -- Learning or review
-          AND c.due > 0
-          {build_deck_filter(deck_id)}
-    """, conn)
-    conn.close()
-
-    # Review cards: due is days since collection start; learning: a timestamp
-    start = get_collection_start_date()
-    today = datetime.now().date()
-    days_until = pd.Series([
-        ((start + timedelta(days=due)) if queue == 2 else datetime.fromtimestamp(due)).date() - today
-        for due, queue in zip(df['due'], df['queue'])
-    ], dtype=object).map(lambda d: d.days)
-    counts = days_until.value_counts().reindex(range(days_ahead), fill_value=0)
+    due = _future_due(deck_id)
+    today = (datetime.now() - timedelta(hours=get_rollover_hour())).date()
     out = pd.DataFrame({
         'date': [today + timedelta(days=d) for d in range(days_ahead)],
-        'due_count': counts.to_numpy(),
+        'due_count': [due.get(d, 0) for d in range(days_ahead)],
     })
     out['ma7'] = out['due_count'].rolling(window=7, min_periods=1).mean()
     return out
