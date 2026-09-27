@@ -123,6 +123,21 @@ INDEX_STRING = '''
                 gap: 6px;
             }
 
+            /* Segmented radio (Range) */
+            .segmented { display: flex; }
+            .segmented label {
+                padding: 4px 10px; font-size: 12px; font-weight: 500; line-height: 1.4;
+                cursor: pointer; color: #8b8fa3; background: #181b23;
+                border: 1px solid #2a2d3a; border-left: none;
+            }
+            .segmented label:first-child { border-left: 1px solid #2a2d3a; border-radius: 3px 0 0 3px; }
+            .segmented label:last-child { border-radius: 0 3px 3px 0; }
+            .segmented label:hover { color: #e0e0e0; }
+            .segmented input { display: none; }
+            .segmented label:has(input:checked) {
+                color: #fff; background: #5b8dff; border-color: #5b8dff;
+            }
+
             /* Stat strip */
             .stat-strip {
                 display: flex;
@@ -186,6 +201,9 @@ INDEX_STRING = '''
                 overflow: hidden;
                 border-radius: 4px;
             }
+            /* Snap instead of animating, so charts redraw at the final size
+               right away rather than chasing a 250ms slide. */
+            .react-grid-item.cssTransforms { transition: none !important; }
             .react-grid-dragHandle {
                 padding: 0 !important;
                 height: 14px;
@@ -498,8 +516,29 @@ INDEX_STRING = '''
                 requestAnimationFrame(function () { pending = false; decorate(); });
             }
 
+            /* Resize each chart whenever its container changes size (grid
+               drags/resizes, their CSS transitions, window resizes, late data),
+               instead of guessing with timed synthetic window resizes. */
+            var observed = new WeakSet();
+            var sizer = new ResizeObserver(function (entries) {
+                entries.forEach(function (e) {
+                    var plot = e.target.querySelector('.js-plotly-plot');
+                    if (plot && e.contentRect.width > 0 && window.Plotly) {
+                        window.Plotly.Plots.resize(plot);
+                    }
+                });
+            });
+            function watchSizes() {
+                document.querySelectorAll('.dash-graph').forEach(function (g) {
+                    if (!observed.has(g)) { observed.add(g); sizer.observe(g); }
+                });
+            }
+
             function start() {
                 decorate();
+                watchSizes();
+                new MutationObserver(watchSizes).observe(
+                    document.body, { childList: true, subtree: true });
                 new MutationObserver(schedule).observe(
                     document.body, { childList: true, subtree: true });
                 setInterval(decorate, 2000);  // cheap idempotent fallback

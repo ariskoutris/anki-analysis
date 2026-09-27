@@ -157,7 +157,6 @@ def create_main_layout():
         dcc.Store(id='xaxis-mode', data='dates', storage_type='local'),
         dcc.Store(id='load-basis', data='interval', storage_type='local'),
         dcc.Store(id='grid-layout-store', storage_type='local'),
-        dcc.Store(id='grid-resize-sync', storage_type='memory'),
         dcc.Store(id='ui-store', storage_type='local', data={
             'session_time_range': 'all',
             'xaxis_mode': 'dates',
@@ -170,23 +169,17 @@ def create_main_layout():
                 html.Div('AnkiDash', className='top-bar__title'),
 
                 html.Div([
-                    # Time range dropdown
+                    # Time range toggle
                     html.Div([
                         html.Span('Range', className='top-bar__label'),
-                        dcc.Dropdown(
+                        dcc.RadioItems(
                             id='session-time-range',
-                            options=[
-                                {'label': '7d', 'value': '7'},
-                                {'label': '30d', 'value': '30'},
-                                {'label': '90d', 'value': '90'},
-                                {'label': '180d', 'value': '180'},
-                                {'label': '365d', 'value': '365'},
-                                {'label': 'All', 'value': 'all'},
-                            ],
+                            options=[{'label': lbl, 'value': v} for lbl, v in [
+                                ('7d', '7'), ('30d', '30'), ('90d', '90'),
+                                ('180d', '180'), ('1y', '365'), ('All', 'all'),
+                            ]],
                             value='all',
-                            clearable=False,
-                            searchable=False,
-                            style={'width': '100px'},
+                            className='segmented',
                         ),
                     ], className='top-bar__group'),
 

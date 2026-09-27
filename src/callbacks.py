@@ -236,7 +236,6 @@ clientside_callback(
                     // component's internal debounced write has landed.
                     setTimeout(function() {
                         window.dash_clientside.set_props('chart-grid', {itemLayout: out});
-                        setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 120);
                     }, 150);
                 }
             }
@@ -272,21 +271,6 @@ def restore_grid_layout(_, stored):
         sanitize_grid_item(by_id[d['i']], d) if d['i'] in by_id else dict(d)
         for d in DEFAULT_GRID_LAYOUT
     ]
-
-
-# Plotly only re-renders on window resize; the grid resizes containers
-# without one, so dispatch a synthetic resize after every layout change.
-clientside_callback(
-    """
-    function(_layout) {
-        setTimeout(function() { window.dispatchEvent(new Event('resize')); }, 150);
-        return window.dash_clientside.no_update;
-    }
-    """,
-    Output('grid-resize-sync', 'data'),
-    Input('chart-grid', 'currentLayout'),
-    prevent_initial_call=False,
-)
 
 
 # ---------------------------------------------------------------------------
