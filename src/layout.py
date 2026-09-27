@@ -38,7 +38,7 @@ DEFAULT_GRID_LAYOUT = [
     {'i': 'w-chart-known-words',         'x': 0, 'y': 5, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
     {'i': 'w-chart-retention-workload',  'x': 2, 'y': 5, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
     {'i': 'w-chart-load-trend',          'x': 0, 'y': 6, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-calibration',         'x': 0, 'y': 7, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+    {'i': 'w-chart-calibration',         'x': 2, 'y': 6, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
 ]
 
 
@@ -165,8 +165,6 @@ def create_main_layout():
         }),
 
         html.Div([
-            # TODO: Improve top bar styling and layout
-
             # ── Top Bar ──
             html.Div([
                 html.Div('AnkiDash', className='top-bar__title'),
@@ -320,6 +318,7 @@ def create_main_layout():
                 # Override the component default (padding:10px, maxHeight:95%),
                 # which ignores the drag-handle height and overflows the graph.
                 draggableChildStyle={'height': '100%', 'padding': 0, 'overflow': 'hidden'},
+                margin=[8, 8],
                 style={'minHeight': '400px'},
             ),
 

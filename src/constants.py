@@ -49,6 +49,18 @@ INDEX_STRING = '''
         <style>
             *, *::before, *::after { box-sizing: border-box; }
 
+            /* Dark scrollbars (page, dropdown menus, overflow areas) */
+            html { color-scheme: dark; scrollbar-color: #2a2d3a #0b0c0e; }
+            ::-webkit-scrollbar { width: 10px; height: 10px; }
+            ::-webkit-scrollbar-track { background: #0b0c0e; }
+            ::-webkit-scrollbar-thumb {
+                background: #2a2d3a;
+                border: 2px solid #0b0c0e;
+                border-radius: 5px;
+            }
+            ::-webkit-scrollbar-thumb:hover { background: #3a3e50; }
+            ::-webkit-scrollbar-corner { background: #0b0c0e; }
+
             body {
                 font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
                 background: #0b0c0e;
@@ -115,6 +127,7 @@ INDEX_STRING = '''
             .stat-strip {
                 display: flex;
                 align-items: center;
+                justify-content: space-around;
                 gap: 6px;
                 padding: 6px 12px;
                 background: #111217;
@@ -164,6 +177,9 @@ INDEX_STRING = '''
                 padding: 4px;
                 min-height: 0;
             }
+
+            /* The grid pads itself by its margin; pull it flush with the bars */
+            #chart-grid { margin: -8px -8px 0; }
 
             /* Draggable grid items */
             .react-grid-item {
@@ -283,6 +299,17 @@ INDEX_STRING = '''
             }
             button.dash-dropdown:hover {
                 border-color: #5b8dff !important;
+            }
+            .top-bar button.dash-dropdown {
+                min-height: 26px !important;
+                height: 26px !important;
+                padding: 0 !important;
+                font-size: 12px !important;
+            }
+            .top-bar .dash-dropdown-trigger {
+                min-height: 0 !important;
+                height: 100%;
+                padding: 0 8px !important;
             }
             .dash-dropdown-trigger-icon {
                 color: #5a5e72 !important;

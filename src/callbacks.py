@@ -445,7 +445,7 @@ _SYNC_OUTPUTS = [
     Output('upload-message-interval', 'disabled', allow_duplicate=True),
     Output('upload-message-interval', 'n_intervals', allow_duplicate=True),
     Output('backup-refresh-token', 'data', allow_duplicate=True),
-    Output('ankiweb-login', 'style'),
+    Output('ankiweb-login', 'style', allow_duplicate=True),
 ]
 
 
