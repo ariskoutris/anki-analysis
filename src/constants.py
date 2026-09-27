@@ -193,58 +193,42 @@ INDEX_STRING = '''
                 min-height: 0;
             }
 
-            /* The grid pads itself by its margin; pull it flush with the bars */
-            #chart-grid { margin: -8px -8px 0; }
-
-            /* Draggable grid items */
-            .react-grid-item {
-                overflow: hidden;
-                border-radius: 4px;
+            /* Chart grid (behaviour in assets/grid.js) */
+            .chart-grid {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                grid-auto-rows: 300px;
+                gap: 8px;
             }
-            /* Snap instead of animating, so charts redraw at the final size
-               right away rather than chasing a 250ms slide. */
-            .react-grid-item.cssTransforms { transition: none !important; }
-            .react-grid-dragHandle {
-                padding: 0 !important;
-                height: 14px;
-                line-height: 14px;
-                font-size: 9px;
-                letter-spacing: 3px;
-                user-select: none;
-                opacity: 0.55;
-                border-radius: 4px 4px 0 0;
-                transition: opacity 0.15s, background 0.15s;
+            .grid-panel { position: relative; min-width: 0; }
+            .grid-panel__grip {
+                position: absolute; top: 3px; left: 50%; transform: translateX(-50%);
+                z-index: 2; padding: 0 10px; border-radius: 3px;
+                font-size: 12px; color: #5a5e72; cursor: grab;
+                user-select: none; touch-action: none;
+                opacity: 0; transition: opacity 0.15s;
             }
-            .react-grid-dragHandle:hover {
-                opacity: 1;
-                background: #2a2d3a !important;
+            .grid-panel:hover .grid-panel__grip,
+            .grid-panel.is-moving .grid-panel__grip { opacity: 1; }
+            .grid-panel__grip:hover { background: #2a2d3a; color: #e0e0e0; }
+            .grid-panel__resize {
+                position: absolute; top: 0; right: -7px; width: 12px; height: 100%;
+                z-index: 2; cursor: ew-resize; touch-action: none;
             }
-            .react-grid-placeholder {
-                background: #5b8dff !important;
-                opacity: 0.12 !important;
-                border-radius: 4px;
+            .grid-panel__resize::after {
+                content: ''; position: absolute; top: 25%; bottom: 25%; left: 5px;
+                width: 2px; border-radius: 1px; background: #5b8dff;
+                opacity: 0; transition: opacity 0.15s;
             }
-
-            /* Resize handles: subtle strips on every border */
-            .react-grid-item > .react-resizable-handle {
-                background-image: none;
-                z-index: 5;
-            }
-            .react-grid-item > .react-resizable-handle::after {
-                border: none !important;
-            }
-            .react-resizable-handle-e,
-            .react-resizable-handle-w {
-                top: 0 !important;
-                height: 100% !important;
-                width: 8px;
-                margin-top: 0 !important;
-                transform: none !important;
-            }
-            /* Height is fixed — vertical-only handles are dead, hide them */
-            .react-resizable-handle-n,
-            .react-resizable-handle-s {
-                display: none;
+            .grid-panel__resize:hover::after,
+            .grid-panel.is-resizing .grid-panel__resize::after { opacity: 1; }
+            .grid-panel.is-moving { outline: 1px dashed #5b8dff; }
+            body.grid-busy { user-select: none; }
+            body.grid-busy .js-plotly-plot { pointer-events: none; }
+            @media (max-width: 900px) {
+                .chart-grid { grid-template-columns: minmax(0, 1fr); }
+                .grid-panel { grid-column: auto !important; }
+                .grid-panel__resize { display: none; }
             }
 
             /* Forecast simulator */

@@ -14,6 +14,7 @@ src/
   config.py                 – Project root + single DB path (data/anki.db)
   constants.py              – COLORS, DARK_CHART_LAYOUT, INDEX_STRING (HTML/CSS template)
   layout.py                 – create_stat_card, create_section_container, tab builders, create_main_layout
+  assets/grid.js            – Chart grid move/resize (plain CSS grid, order + widths in localStorage)
   callbacks.py              – All @callback functions + parse_time_range
   charts_session.py         – 5 session chart functions + session-mode helpers
   charts_card.py            – 9 card/analytics chart functions (pure: DataFrame → Figure)

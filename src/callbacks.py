@@ -8,7 +8,7 @@ import time
 from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, clientside_callback, ctx, no_update
+from dash import Input, Output, State, callback, ctx, no_update
 
 from .config import DATA_DIR
 from .constants import COLORS, DARK_CHART_LAYOUT
@@ -16,7 +16,7 @@ from .upload_handler import process_apkg_upload
 from anki.errors import SyncError
 
 from .anki_sync import sync_from_ankiweb, login, is_logged_in, get_last_sync_time
-from .layout import create_stat_item, DEFAULT_GRID_LAYOUT, sanitize_grid_item, segmented_styles
+from .layout import create_stat_item, segmented_styles
 from .charts_session import (
     create_daily_reviews_chart,
     create_hourly_chart,
@@ -168,109 +168,6 @@ def update_overview_container(_refresh_token, _url, deck_value, load_basis):
 
     return (upcoming, streak, recall, true_retention, overdue, total_reviews, total_hours,
             days_active, cards_learned, avg_ret, daily_load)
-
-
-# ---------------------------------------------------------------------------
-# Callbacks: Persist / restore the draggable chart grid layout
-# ---------------------------------------------------------------------------
-
-# Save grid changes and normalize resizes, fully clientside (no server
-# round-trip). When an item's width changed, row membership is restored
-# from the previous stored layout and neighbours shrink so the row still
-# sums to 3 units; the corrected layout is re-applied just after the
-# component's own debounced itemLayout self-write (~50ms) has settled.
-clientside_callback(
-    """
-    function(current, prev) {
-        const nu = window.dash_clientside.no_update;
-        if (!Array.isArray(current) || !current.length) { return nu; }
-        const COLS = 3;
-        const pick = it => ({i: it.i, x: it.x, y: it.y, w: it.w, h: 1});
-        const canon = current.filter(it => it && typeof it.i === 'string').map(pick);
-
-        let out = canon;
-        if (Array.isArray(prev) && prev.length) {
-            const prevBy = {}, curBy = {};
-            prev.forEach(it => { if (it && it.i) { prevBy[it.i] = it; } });
-            canon.forEach(it => { curBy[it.i] = it; });
-            const pKeys = Object.keys(prevBy).sort(), cKeys = Object.keys(curBy).sort();
-            if (JSON.stringify(pKeys) === JSON.stringify(cKeys)) {
-                const resized = cKeys.filter(k => (curBy[k].w | 0) !== (prevBy[k].w | 0));
-                if (resized.length) {
-                    const target = resized[0];
-                    const rows = {};
-                    pKeys.forEach(k => {
-                        const y = prevBy[k].y | 0;
-                        (rows[y] = rows[y] || []).push(k);
-                    });
-                    const res = {};
-                    Object.keys(rows).forEach(yk => {
-                        const y = +yk;
-                        const members = rows[yk].sort((a, b) => (prevBy[a].x | 0) - (prevBy[b].x | 0));
-                        if (!members.includes(target)) {
-                            members.forEach(k => { res[k] = pick(prevBy[k]); });
-                            return;
-                        }
-                        const others = members.filter(k => k !== target);
-                        const wT = Math.max(1, Math.min(curBy[target].w | 0, COLS - others.length));
-                        const remaining = COLS - wT;
-                        const widths = {}; widths[target] = wT;
-                        if (others.length) {
-                            const prevTotal = others.reduce((s, k) => s + (prevBy[k].w | 0), 0);
-                            if (prevTotal <= remaining) {
-                                others.forEach(k => { widths[k] = prevBy[k].w | 0; });
-                                widths[others[others.length - 1]] += remaining - prevTotal;
-                            } else {
-                                others.forEach(k => { widths[k] = 1; });
-                                let slack = remaining - others.length;
-                                const order = others.slice().sort((a, b) => (prevBy[b].w | 0) - (prevBy[a].w | 0));
-                                let idx = 0;
-                                while (slack > 0) { widths[order[idx % order.length]] += 1; slack -= 1; idx += 1; }
-                            }
-                        }
-                        let x = 0;
-                        members.forEach(k => { res[k] = {i: k, x: x, y: y, w: widths[k], h: 1}; x += widths[k]; });
-                    });
-                    out = cKeys.map(k => res[k]).filter(Boolean);
-                    // Snap the grid to the corrected layout once the
-                    // component's internal debounced write has landed.
-                    setTimeout(function() {
-                        window.dash_clientside.set_props('chart-grid', {itemLayout: out});
-                    }, 150);
-                }
-            }
-        }
-        return out;
-    }
-    """,
-    Output('grid-layout-store', 'data'),
-    Input('chart-grid', 'currentLayout'),
-    State('grid-layout-store', 'data'),
-    prevent_initial_call=True,
-)
-
-
-@callback(
-    Output('chart-grid', 'itemLayout'),
-    Input('url', 'pathname'),
-    State('grid-layout-store', 'data'),
-    prevent_initial_call=False,
-)
-def restore_grid_layout(_, stored):
-    """Restore the saved grid layout on page load. Stored items are clamped
-    onto the discrete 3-column grid (also migrates stale layouts saved under
-    older grid geometries); charts missing from the store get defaults."""
-    if not stored:
-        return DEFAULT_GRID_LAYOUT
-    # Layouts saved under a different grid geometry (e.g. the old 12-column
-    # grid) can't be meaningfully clamped — reset to defaults instead.
-    if any(isinstance(i, dict) and (i.get('w') or 0) > 3 for i in stored):
-        return DEFAULT_GRID_LAYOUT
-    by_id = {item.get('i'): item for item in stored if isinstance(item, dict)}
-    return [
-        sanitize_grid_item(by_id[d['i']], d) if d['i'] in by_id else dict(d)
-        for d in DEFAULT_GRID_LAYOUT
-    ]
 
 
 # ---------------------------------------------------------------------------

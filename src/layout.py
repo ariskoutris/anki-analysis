@@ -3,7 +3,6 @@ Layout builders for AnkiDash.
 Single-page dark Grafana-style grid layout.
 """
 
-import dash_dynamic_grid_layout as dgl
 from dash import dcc, html
 
 from .constants import COLORS
@@ -14,43 +13,18 @@ from .charts_card import create_sim_memorized_chart, create_sim_reviews_chart
 CHART_HEIGHT = '280px'
 DARK_BG = {'backgroundColor': '#111217'}
 
-# Grid discretization: 3 columns of equal thirds, so a row can only be
-# 1-1-1, 2-1, 1-2, or 3. Height is fixed (minH = maxH = 1 row).
-GRID_COLS = 3
-GRID_ROW_HEIGHT = 300
-_GRID_CONSTRAINTS = {'minW': 1, 'maxW': GRID_COLS, 'minH': 1, 'maxH': 1}
-
-# NOTE: layout ids must match the DraggableWrapper ids ('w-' + chart id) —
-# the component matches itemLayout entries against child keys, which Dash
-# derives from the wrapper's id. The dcc.Graph inside keeps the bare chart id.
-DEFAULT_GRID_LAYOUT = [
-    {'i': 'w-chart-future-load',         'x': 0, 'y': 0, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-stability-dist',      'x': 2, 'y': 0, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-daily-reviews',       'x': 0, 'y': 1, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-retrievability-dist', 'x': 2, 'y': 1, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-recall-rate',         'x': 0, 'y': 2, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-difficulty-dist',     'x': 2, 'y': 2, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-review-speed',        'x': 0, 'y': 3, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-hourly',              'x': 2, 'y': 3, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-fatigue',             'x': 0, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-load-intro',          'x': 1, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-lapse-load',          'x': 2, 'y': 4, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-known-words',         'x': 0, 'y': 5, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-retention-workload',  'x': 2, 'y': 5, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-load-trend',          'x': 0, 'y': 6, 'w': 2, 'h': 1, **_GRID_CONSTRAINTS},
-    {'i': 'w-chart-calibration',         'x': 2, 'y': 6, 'w': 1, 'h': 1, **_GRID_CONSTRAINTS},
+# Chart grid: 3 equal columns, fixed-height rows. Each entry is (chart id,
+# default width in columns). Order and widths are adjusted in the browser by
+# src/assets/grid.js and kept in localStorage.
+DEFAULT_GRID = [
+    ('chart-future-load', 2), ('chart-stability-dist', 1),
+    ('chart-daily-reviews', 2), ('chart-retrievability-dist', 1),
+    ('chart-recall-rate', 2), ('chart-difficulty-dist', 1),
+    ('chart-review-speed', 2), ('chart-hourly', 1),
+    ('chart-fatigue', 1), ('chart-load-intro', 1), ('chart-lapse-load', 1),
+    ('chart-known-words', 2), ('chart-retention-workload', 1),
+    ('chart-load-trend', 2), ('chart-calibration', 1),
 ]
-
-
-def sanitize_grid_item(stored: dict, default: dict) -> dict:
-    """Clamp a stored grid item onto the discrete 3-column grid."""
-    try:
-        w = min(max(int(stored.get('w', default['w'])), 1), GRID_COLS)
-        x = min(max(int(stored.get('x', default['x'])), 0), GRID_COLS - w)
-        y = max(int(stored.get('y', default['y'])), 0)
-    except (TypeError, ValueError):
-        return dict(default)
-    return {'i': default['i'], 'x': x, 'y': y, 'w': w, 'h': 1, **_GRID_CONSTRAINTS}
 
 
 def segmented_styles(left_active):
@@ -66,27 +40,15 @@ def segmented_styles(left_active):
             {**right, 'borderRadius': '0 3px 3px 0', 'borderLeft': 'none'})
 
 
-def _grid_chart(wrapper_id):
-    """A draggable/resizable grid item wrapping one chart."""
-    chart_id = wrapper_id.removeprefix('w-')
-    return dgl.DraggableWrapper(
-        id=wrapper_id,
-        children=[
-            html.Div(
-                dcc.Graph(
-                    id=chart_id,
-                    config={'displayModeBar': False},
-                    responsive=True,
-                    style={'height': '100%', **DARK_BG},
-                ),
-                className='chart-panel',
-                style={'height': '100%'},
-            ),
-        ],
-        handleText='⠿',
-        handleBackground='#181b23',
-        handleColor='#5a5e72',
-    )
+def _grid_panel(chart_id, width):
+    """One chart in the grid, with a move grip and a right-edge resize handle."""
+    return html.Div([
+        html.Div('⠿', className='grid-panel__grip', title='Drag to move'),
+        dcc.Graph(id=chart_id, config={'displayModeBar': False}, responsive=True,
+                  style={'height': '100%', **DARK_BG}),
+        html.Div(className='grid-panel__resize', title='Drag to resize'),
+    ], className='chart-panel grid-panel', **{'data-id': chart_id, 'data-w': str(width)})
+
 
 def _sim_input(label, input_id, value, suffix=None, **input_kwargs):
     """A labelled numeric input for the forecast simulator control row."""
@@ -156,7 +118,6 @@ def create_main_layout():
         dcc.Store(id='backup-refresh-token', data=0, storage_type='memory'),
         dcc.Store(id='xaxis-mode', data='dates', storage_type='local'),
         dcc.Store(id='load-basis', data='interval', storage_type='local'),
-        dcc.Store(id='grid-layout-store', storage_type='local'),
         dcc.Store(id='ui-store', storage_type='local', data={
             'session_time_range': 'all',
             'xaxis_mode': 'dates',
@@ -298,22 +259,9 @@ def create_main_layout():
                 html.Div(id='stat-daily-load'),
             ], className='stat-strip'),
 
-            # ── Chart Grid (draggable / resizable) ──
-            dgl.DashGridLayout(
-                id='chart-grid',
-                items=[_grid_chart(item['i']) for item in DEFAULT_GRID_LAYOUT],
-                itemLayout=DEFAULT_GRID_LAYOUT,
-                rowHeight=GRID_ROW_HEIGHT,
-                cols={'lg': GRID_COLS, 'md': GRID_COLS, 'sm': 1, 'xs': 1, 'xxs': 1},
-                compactType='vertical',
-                showRemoveButton=False,
-                showResizeHandles=True,
-                # Override the component default (padding:10px, maxHeight:95%),
-                # which ignores the drag-handle height and overflows the graph.
-                draggableChildStyle={'height': '100%', 'padding': 0, 'overflow': 'hidden'},
-                margin=[8, 8],
-                style={'minHeight': '400px'},
-            ),
+            # ── Chart Grid (movable / resizable, see assets/grid.js) ──
+            html.Div([_grid_panel(cid, w) for cid, w in DEFAULT_GRID],
+                     id='chart-grid', className='chart-grid'),
 
             # ── Forecast Simulator ──
             create_simulator_section(),
