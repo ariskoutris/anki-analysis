@@ -52,12 +52,12 @@ from . import callbacks  # noqa: F401, E402
 try:
     try:
         with open(callbacks.LAST_VIEW_FILE) as f:
-            deck, time_range, xaxis_mode, load_basis = json.load(f)
+            deck, time_range, xaxis_mode = json.load(f)[:3]
     except (OSError, ValueError):
-        deck, time_range, xaxis_mode, load_basis = 'all', 'all', 'dates', 'interval'
-    callbacks.update_overview_container(0, '/', deck, load_basis)
+        deck, time_range, xaxis_mode = 'all', 'all', 'dates'
+    callbacks.update_overview_container(0, '/', deck)
     callbacks.update_session_charts(time_range, xaxis_mode, 0, deck)
-    callbacks.update_card_charts(0, deck, time_range, xaxis_mode, load_basis)
+    callbacks.update_card_charts(0, deck, time_range, xaxis_mode)
 except Exception as e:
     print(f"  Cache warm-up skipped: {e}")
 

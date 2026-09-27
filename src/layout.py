@@ -140,14 +140,6 @@ def create_main_layout():
 
                     html.Div(className='top-bar__separator'),
 
-                    # Load basis toggle (interval vs stability)
-                    html.Div([
-                        html.Span('Load', className='top-bar__label'),
-                        _segmented('load-basis', [('Interval', 'interval'), ('Stability', 'stability')]),
-                    ], className='top-bar__group'),
-
-                    html.Div(className='top-bar__separator'),
-
                     # Deck filter
                     html.Div([
                         html.Span('Deck', className='top-bar__label'),

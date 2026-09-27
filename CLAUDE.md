@@ -84,7 +84,7 @@ Data layer. Plain SQL goes through `connect_db()` (sqlite3); anything Anki compu
 
 **Summaries:**
 - `get_overview_stats()` – review cards, review count, total hours, days studied
-- `calculate_daily_load()` – Σ(1/stability) for review cards
+- `calculate_daily_load()` – Σ(1/stored interval) for review cards; an estimated scheduled review rate
 - `get_future_load_forecast(days_ahead)` – due counts per day from Anki's `graphs().future_due` (day 0 = Anki's today)
 
 **Section summary functions:**

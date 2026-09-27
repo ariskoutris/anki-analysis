@@ -447,19 +447,19 @@ INDEX_STRING = '''
                     y: 'Review time relative to the current setting, including relearning after lapses.'
                 },
                 'chart-load-intro': {
-                    title: 'Current review load contributed by cards, grouped by when they were introduced.',
+                    title: 'Estimated scheduled review rate contributed by cards, grouped by when they were introduced.',
                     x: 'Month the cards were first introduced.',
-                    y: 'Daily load from those cards (Σ 1/interval).'
+                    y: 'Estimated reviews per day from those cards (Σ 1/stored interval).'
                 },
                 'chart-load-trend': {
-                    title: 'Daily review load over time, reconstructed from your review history.',
+                    title: 'Estimated scheduled review rate over time, reconstructed from stored review intervals.',
                     x: 'Calendar date.',
-                    y: 'Reviews per day the schedule generated (Σ 1/interval).'
+                    y: 'Estimated reviews per day from stored intervals (Σ 1/interval).'
                 },
                 'chart-lapse-load': {
-                    title: 'How much of your daily review load comes from cards with each lapse count.',
+                    title: 'Estimated scheduled review rate from cards with each lapse count.',
                     x: 'Number of times the card has lapsed.',
-                    y: 'Daily load from those cards (Σ 1/interval).'
+                    y: 'Estimated reviews per day from those cards (Σ 1/stored interval).'
                 },
                 'chart-fatigue': {
                     title: 'Success rate as a study session progresses.',

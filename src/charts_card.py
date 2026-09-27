@@ -59,7 +59,7 @@ def create_known_words_chart(df):
 
 def create_load_timeseries_chart(df, use_sessions=False, session_dates=None):
     """
-    Historical daily load (Σ 1/interval ≈ reviews/day) over time.
+    Historical scheduled review rate (Σ 1/interval) over time.
     Input: DataFrame[date, load] from data_loader.get_load_timeseries.
     In session mode the series is compressed to study-session days and the
     x-axis becomes a sequential session number.
@@ -79,7 +79,7 @@ def create_load_timeseries_chart(df, use_sessions=False, session_dates=None):
             x=d.index, y=d['load'], mode='lines', line=line,
             fill='tozeroy', fillcolor=fill, customdata=d['date'],
             hovertemplate=('Session %{x}<br>%{customdata|%b %d, %Y}'
-                           '<br>Load: %{y:.1f} reviews/day<extra></extra>'),
+                           '<br>Scheduled: %{y:.1f} reviews/day<extra></extra>'),
         ))
         x_title = 'Session Number'
     else:
@@ -87,14 +87,14 @@ def create_load_timeseries_chart(df, use_sessions=False, session_dates=None):
         fig.add_trace(go.Scatter(
             x=d['date'], y=d['load'], mode='lines', line=line,
             fill='tozeroy', fillcolor=fill,
-            hovertemplate='%{x|%b %d, %Y}<br>Load: %{y:.1f} reviews/day<extra></extra>',
+            hovertemplate='%{x|%b %d, %Y}<br>Scheduled: %{y:.1f} reviews/day<extra></extra>',
         ))
         x_title = None
 
     fig.update_layout(
         title='Load Trend',
         xaxis_title=x_title,
-        yaxis_title='Daily load',
+        yaxis_title='Scheduled reviews/day',
         hovermode='x unified',
         **DARK_CHART_LAYOUT,
     )

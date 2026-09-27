@@ -119,14 +119,12 @@ _EMPTY_FIG = go.Figure(layout=dict(
     ],
     [Input('backup-refresh-token', 'data'),
      Input('url', 'pathname'),
-     Input('deck-filter', 'value'),
-     Input('load-basis', 'value')],
+     Input('deck-filter', 'value')],
     prevent_initial_call=False
 )
-def update_overview_container(_refresh_token, _url, deck_value, load_basis):
+def update_overview_container(_refresh_token, _url, deck_value):
     """Populate the stat strip with current metrics."""
     deck_id = parse_deck(deck_value)
-    use_stability = (load_basis == 'stability')
     stats = get_overview_stats(deck_id=deck_id)
     ret = get_card_data(deck_id=deck_id)['retrievability']
     mean_ret = float(ret.mean()) if len(ret) else 0.0
@@ -168,8 +166,8 @@ def update_overview_container(_refresh_token, _url, deck_value, load_basis):
         COLORS['success'] if mean_ret >= 80 else COLORS['warning'],
         secondary=True)
     daily_load = create_stat_item(
-        f"{calculate_daily_load(deck_id=deck_id, use_stability=use_stability):.1f}",
-        'Daily Load', COLORS['text_secondary'], secondary=True)
+        f"{calculate_daily_load(deck_id=deck_id):.1f}",
+        'Scheduled Reviews/Day', COLORS['text_secondary'], secondary=True)
 
     return (upcoming, streak, recall, true_retention, overdue, total_reviews, total_hours,
             days_active, cards_learned, avg_ret, daily_load)
@@ -429,18 +427,16 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value):
     [Input('backup-refresh-token', 'data'),
      Input('deck-filter', 'value'),
      Input('session-time-range', 'value'),
-     Input('xaxis-mode', 'value'),
-     Input('load-basis', 'value')],
+     Input('xaxis-mode', 'value')],
     prevent_initial_call=False
 )
-def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode, load_basis):
+def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode):
     """Update card charts based on filters, date range and x-axis mode."""
     # Remember the view, so the next startup warms the cache for it (app.py)
     with open(LAST_VIEW_FILE, 'w') as f:
-        json.dump([deck_value, time_range, xaxis_mode, load_basis], f)
+        json.dump([deck_value, time_range, xaxis_mode], f)
     deck_id = parse_deck(deck_value)
     use_sessions = (xaxis_mode == 'sessions')
-    use_stability = (load_basis == 'stability')
     review_days = parse_time_range(time_range)
     cutoff = (None if review_days is None
               else pd.Timestamp(datetime.now().date()) - pd.Timedelta(days=review_days))
@@ -467,7 +463,7 @@ def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode, load_
     fig_retention = create_retention_workload_chart(get_retention_workload_curve(deck_id=deck_id))
 
     # Load by Introduction: date range + session bucketing
-    intro_df = get_load_by_introduction(deck_id=deck_id, use_stability=use_stability)
+    intro_df = get_load_by_introduction(deck_id=deck_id)
     if cutoff is not None and not intro_df.empty:
         intro_df = intro_df[intro_df['intro_date'] >= cutoff]
     fig_load_intro = create_load_by_introduction_chart(
@@ -476,14 +472,14 @@ def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode, load_
     fig_fatigue = create_fatigue_chart(get_fatigue_curve(deck_id=deck_id))
 
     # Load Trend: date range + session numbering
-    load_df = get_load_timeseries(deck_id=deck_id, use_stability=use_stability)
+    load_df = get_load_timeseries(deck_id=deck_id)
     if cutoff is not None and not load_df.empty:
         load_df = load_df[load_df['date'] >= cutoff]
     fig_load_trend = create_load_timeseries_chart(
         load_df, use_sessions=use_sessions, session_dates=session_dates)
 
     fig_lapse_load = create_lapse_load_chart(
-        get_lapse_load(deck_id=deck_id, use_stability=use_stability))
+        get_lapse_load(deck_id=deck_id))
 
     return (fig_known, fig_calib, fig_ret, fig_stab, fig_diff,
             fig_retention, fig_load_intro, fig_fatigue, fig_load_trend,

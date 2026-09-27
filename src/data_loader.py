@@ -271,22 +271,16 @@ def get_overview_stats(deck_id: int | None = None) -> dict:
     }
 
 
-def get_card_load(deck_id: int | None = None, use_stability: bool = False,
-                  with_intro: bool = False) -> pd.DataFrame:
+def get_card_load(deck_id: int | None = None, with_intro: bool = False) -> pd.DataFrame:
     """
-    Per-card current load contribution for review cards. contrib = 1/interval,
-    where the interval is either the stored `ivl` (interval mode) or the FSRS
-    interval implied by the card's stability at its deck's desired retention
-    (stability mode) — more robust after manual/FSRS rescheduling, which
-    leaves stored intervals stale.
+    Per-card scheduled review rate for review cards: 1/stored interval.
 
     Returns DataFrame[did, ivl, lapses, contrib] (+ intro_date if with_intro).
     """
     deck_filter = build_deck_filter(deck_id)
     if with_intro:
         query = f"""
-            SELECT c.did, c.ivl, c.lapses, round(extract_fsrs_variable(c.data, 's'), 4),
-                   MIN(r.id) / 1000
+            SELECT c.did, c.ivl, c.lapses, MIN(r.id) / 1000
             FROM cards c
             JOIN revlog r ON r.cid = c.id
             WHERE c.queue = 2 AND c.ivl > 0 AND c.odid = 0
@@ -296,46 +290,23 @@ def get_card_load(deck_id: int | None = None, use_stability: bool = False,
         """
     else:
         query = f"""
-            SELECT c.did, c.ivl, c.lapses, round(extract_fsrs_variable(c.data, 's'), 4)
+            SELECT c.did, c.ivl, c.lapses
             FROM cards c
             WHERE c.queue = 2 AND c.ivl > 0 AND c.odid = 0
               {deck_filter}
         """
-    with open_collection() as col:
-        df = pd.DataFrame(col.db.all(query), columns=['did', 'ivl', 'lapses', 's']
-                          + (['first_ts'] if with_intro else []))
+    conn = connect_db()
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    df.columns = ['did', 'ivl', 'lapses'] + (['first_ts'] if with_intro else [])
 
     if df.empty:
         cols = ['did', 'ivl', 'lapses', 'contrib'] + (['intro_date'] if with_intro else [])
         return pd.DataFrame(columns=cols)
 
-    ivl_contrib = 1.0 / df['ivl'].clip(lower=1)
-    if use_stability:
-        from .fsrs_engine import get_deck_fsrs_configs, DEFAULT_DECAY
-        cfgs = get_deck_fsrs_configs()
-
-        def decay_of(did):
-            return (cfgs.get(did) or {}).get('decay', DEFAULT_DECAY)
-
-        def rd_of(did):
-            return (cfgs.get(did) or {}).get('desired_retention', 0.9)
-
-        s = pd.to_numeric(df['s'], errors='coerce').to_numpy(dtype=float)
-        decay = df['did'].map(decay_of).to_numpy(dtype=float)
-        r_d = df['did'].map(rd_of).to_numpy(dtype=float)
-        factor = 0.9 ** (1.0 / decay) - 1.0
-        with np.errstate(invalid='ignore', divide='ignore'):
-            interval = s / factor * (r_d ** (1.0 / decay) - 1.0)
-        interval = np.clip(interval, 1.0, None)
-        contrib = 1.0 / interval
-        # Cards without a parsed stability fall back to the stored interval
-        contrib = np.where(np.isfinite(contrib), contrib, ivl_contrib.to_numpy())
-    else:
-        contrib = ivl_contrib.to_numpy()
-
     out = pd.DataFrame({
         'did': df['did'], 'ivl': df['ivl'], 'lapses': df['lapses'],
-        'contrib': contrib,
+        'contrib': 1.0 / df['ivl'],
     })
     if with_intro:
         out['intro_date'] = pd.to_datetime(df['first_ts'], unit='s').dt.normalize()
@@ -343,19 +314,16 @@ def get_card_load(deck_id: int | None = None, use_stability: bool = False,
 
 
 @per_db
-def calculate_daily_load(deck_id: int | None = None,
-                         use_stability: bool = False) -> float:
+def calculate_daily_load(deck_id: int | None = None) -> float:
     """
-    Daily load: Σ(1/interval) over review cards (the average number of cards
-    due per day at steady state). See get_card_load for interval vs stability.
+    Scheduled review rate: Σ(1/interval) over review cards.
     """
-    df = get_card_load(deck_id, use_stability=use_stability)
+    df = get_card_load(deck_id)
     return round(float(df['contrib'].sum()) if not df.empty else 0.0, 2)
 
 
 @per_db
-def get_load_timeseries(deck_id: int | None = None,
-                        use_stability: bool = False) -> pd.DataFrame:
+def get_load_timeseries(deck_id: int | None = None) -> pd.DataFrame:
     """
     Historical daily load: for each day, Σ(1/interval) over all cards in
     review state on that day, reconstructed from the revlog. Each review
@@ -363,14 +331,8 @@ def get_load_timeseries(deck_id: int | None = None,
     contributes 1/interval from each review until the following one (and 0
     while it sits in learning, where the logged interval is non-positive).
 
-    In stability mode the interval at each review is instead derived from the
-    replayed stability (s_after) at that card's deck desired retention.
-
     Returns DataFrame[date, load].
     """
-    if use_stability:
-        return _load_timeseries_stability(deck_id)
-
     conn = connect_db()
     deck_filter = build_deck_filter(deck_id)
     # Restrict to cards that are currently review cards so the series
@@ -419,60 +381,14 @@ def get_load_timeseries(deck_id: int | None = None,
     return pd.DataFrame({'date': load.index, 'load': load.to_numpy()})
 
 
-def _load_timeseries_stability(deck_id: int | None = None) -> pd.DataFrame:
-    """
-    Stability-based load over time: replay each review and derive its interval
-    from the replayed stability (s_after) at the deck desired retention, so the
-    series reflects true memory state rather than possibly-stale stored ivls.
-    """
-    from .fsrs_engine import replay_reviews, get_deck_fsrs_configs
-
-    df = replay_reviews(deck_id)
-    if df.empty:
-        return pd.DataFrame(columns=['date', 'load'])
-
-    # Restrict to cards that are currently review cards (matches other modes)
-    conn = connect_db()
-    deck_filter = build_deck_filter(deck_id)
-    cur = pd.read_sql_query(f"""
-        SELECT c.id AS cid FROM cards c
-        WHERE c.queue = 2 AND c.ivl > 0 AND c.odid = 0 {deck_filter}
-    """, conn)
-    conn.close()
-    df = df[df['cid'].isin(set(cur['cid']))].copy()
-    if df.empty:
-        return pd.DataFrame(columns=['date', 'load'])
-
-    cfgs = get_deck_fsrs_configs()
-    r_d = df['did'].map(
-        lambda d: (cfgs.get(d) or {}).get('desired_retention', 0.9)).to_numpy(dtype=float)
-    decay = df['decay'].to_numpy(dtype=float)
-    factor = df['factor'].to_numpy(dtype=float)
-    interval = np.clip(
-        df['s_after'].to_numpy(dtype=float) / factor * (r_d ** (1.0 / decay) - 1.0),
-        1.0, None)
-    df['contrib'] = 1.0 / interval
-
-    df = df.sort_values(['cid', 'ts'])
-    df['delta'] = df['contrib'] - df.groupby('cid')['contrib'].shift(fill_value=0.0)
-    df['date'] = pd.to_datetime(df['ts'], unit='s').dt.normalize()
-
-    today = pd.Timestamp(datetime.now().date())
-    daily = df.groupby('date')['delta'].sum().sort_index()
-    full = pd.date_range(daily.index.min(), today, freq='D')
-    load = daily.reindex(full, fill_value=0.0).cumsum()
-    return pd.DataFrame({'date': load.index, 'load': load.to_numpy()})
-
-
 @per_db
-def get_load_by_introduction(deck_id: int | None = None,
-                             use_stability: bool = False) -> pd.DataFrame:
+def get_load_by_introduction(deck_id: int | None = None) -> pd.DataFrame:
     """
     Per-card current load contribution alongside each card's introduction date
     (its first genuine review). Bucketing by month/quarter or session range is
     done in the chart layer. Returns DataFrame[intro_date, contrib].
     """
-    df = get_card_load(deck_id, use_stability=use_stability, with_intro=True)
+    df = get_card_load(deck_id, with_intro=True)
     if df.empty:
         return pd.DataFrame(columns=['intro_date', 'contrib'])
     return df[['intro_date', 'contrib']]
@@ -503,14 +419,13 @@ def get_session_dates(deck_id: int | None = None) -> pd.Series:
 
 
 @per_db
-def get_lapse_load(deck_id: int | None = None,
-                   use_stability: bool = False) -> pd.DataFrame:
+def get_lapse_load(deck_id: int | None = None) -> pd.DataFrame:
     """
     Current review load (Σ 1/interval) and card count grouped by a card's
     lapse count — how much of your daily burden comes from cards that keep
     failing. Review cards only. Returns DataFrame[lapses, cards, load].
     """
-    df = get_card_load(deck_id, use_stability=use_stability)
+    df = get_card_load(deck_id)
     if df.empty:
         return pd.DataFrame(columns=['lapses', 'cards', 'load'])
     return (df.groupby('lapses')
