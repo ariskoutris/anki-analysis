@@ -567,7 +567,7 @@ def run_forecast_simulation(_n, days, retention, new_per_day, max_reviews, deck_
 
     sim = simulate_future(
         deck_id=deck_id, days=days, desired_retention=retention,
-        new_per_day=new_per_day, max_reviews=max_reviews, n_runs=2,
+        new_per_day=new_per_day, max_reviews=max_reviews,
     )
     return create_sim_memorized_chart(sim), create_sim_reviews_chart(sim)
 

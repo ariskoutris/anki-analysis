@@ -20,8 +20,8 @@ src/
   upload_handler.py         – .apkg file upload processing
   anki_sync.py              – AnkiWeb login + full download → data/anki.db via the `anki` package; sync key in data/ankiweb.json, last successful sync in data/last_sync.json (`get_last_sync_time()`)
   data_loader.py            – All SQL queries, FSRS calculations, DataFrame construction, summary stats
-  fsrs_engine.py            – FSRS history replay (py-fsrs) + advanced analytics (see below)
-pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly, fsrs, pywebview, anki); managed with uv
+  fsrs_engine.py            – FSRS analytics on Anki's backend (`anki` package) (see below)
+pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly, pywebview, anki); managed with uv
 uv.lock                     – Pinned dependency lockfile
 scripts/install-launcher.sh – Builds ~/Applications/Anki Dashboard.app (macOS) pointing at this checkout
 assets/icon.png             – 1024px app icon (converted to .icns by the install script)
@@ -98,34 +98,33 @@ Pure data layer. Every public function opens its own `sqlite3` connection via `c
 
 ### fsrs_engine.py
 
-FSRS replay + advanced analytics layer (added 2026-07). Core idea: reconstruct
-per-review memory states by replaying the entire revlog through **py-fsrs**
-using each deck's own FSRS parameters, parsed from the `deck_config` protobuf
-blobs (fields 6/5/3 = FSRS-6/5/4.5 packed floats; field 37 = desired retention;
-17/19-param sets are migrated to 21 by appending `[0,0]` / `[0,0.5]`).
-Deck→preset mapping comes from the `decks.kind` protobuf (field 1.1 = config id).
+FSRS analytics layer. Memory states, presets, the simulator and the workload
+estimate all come from Anki's own backend via the `anki` package, so they match
+what Anki schedules with. `open_collection()` opens data/anki.db as an Anki
+`Collection` under a lock (the backend raises DBError on concurrent opens; Dash
+runs callbacks in parallel); plain sqlite3 reads keep working alongside it.
 
+- `get_deck_fsrs_configs()` – deck_id → decay/desired retention/daily
+  limits from `col.decks.config_dict_for_deck_id` (17/19-param sets migrated
+  to 21 by appending `[0,0]` / `[0,0.5]`). "All decks" uses the preset of the
+  deck with the most review cards (`_main_config`).
 - `replay_reviews(deck_id)` – one row per genuine review (types 0-3, ease 1-4,
-  card still in collection) with predicted retrievability + stability/difficulty
-  before/after. Cached per (db mtime, deck_id). Validated against Anki's own
-  `cards.data` snapshot: difficulty exact, stability median rel-err ~3%
-  (residual = Anki day-cutoff rounding).
+  card still in collection) with predicted retrievability + stability after,
+  from `col.card_stats_data(cid).revlog[*].memory_state`
+  (exact match to `cards.data`). Cached per (db mtime, deck_id).
 - `get_known_words_timeseries` – Σ retrievability over all seen cards per day
   (hero chart, full-width row)
 - `get_calibration_data` / `get_calibration_summary` – predicted vs observed
   recall, equal-count bins, Wilson CIs; same-day reviews excluded
-- `get_retention_workload_curve` – desired retention sweep → equilibrium
-  reviews/day via I(R_d,S) = S/factor · (R_d^(1/decay) − 1)
+- `get_retention_workload_curve` – Anki's `get_retention_workload` (deck
+  options' "help me decide"): review time cost at 70–99% retention incl.
+  relearning, shown relative to the current setting (1×)
 - `get_fatigue_curve` – accuracy/answer-time vs within-session position
   (sessions split on >30 min gaps)
-- `simulate_future` – Monte-Carlo forward FSRS simulation (Anki's FSRS
-  Simulator). Seeds current card states, rolls the py-fsrs scheduler
-  day-by-day with Anki's default rating distributions; returns per-day
-  memorized (Σ retrievability) and reviews. No off-the-shelf simulator
-  fit: py-fsrs has none (only a private torch-gated cost sim in
-  Optimizer); fsrs-rs-python's simulate() is fresh-deck only (can't seed
-  the current collection); fsrs-optimizer drags in torch. Powers the
-  Forecast Simulator section (controls + 2 charts, below the grid).
+- `simulate_future` – Anki's FSRS simulator (`simulate_fsrs_review`),
+  seeded with the deck's current cards and preset; returns per-day memorized
+  (Σ retrievability) and reviews. Powers the Forecast Simulator section
+  (controls + 2 charts, below the grid).
 
 FSRS-6 forgetting curve used throughout: `R(t) = (1 + factor·t/S)^decay`,
 `decay = −w20`, `factor = 0.9^(1/decay) − 1`.
@@ -208,7 +207,7 @@ Charts support a date/session x-axis toggle. In session mode, sequential indices
 ## Conventions
 
 - FSRS params live in `cards.data` as JSON: `{"s": stability, "d": difficulty, "lrt": last_review_timestamp_sec, ...}`
-- Retrievability formula: `R = exp(ln(0.9) * days_since_review / stability)`
+- Retrievability formula: FSRS-6 curve with each deck's decay (`calculate_retrievability`); matches Anki's own value
 - All SQL filters are built via `build_time_filter()` which returns a SQL fragment
 - Charts use a shared `COLORS` dict and `DARK_CHART_LAYOUT` for consistent styling (defined in `constants.py`)
 - All modules use relative imports (`from .constants import COLORS`); run via `uv run python -m src.app`

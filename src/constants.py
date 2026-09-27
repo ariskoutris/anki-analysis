@@ -403,9 +403,9 @@ INDEX_STRING = '''
                     y: 'Number of cards.'
                 },
                 'chart-retention-workload': {
-                    title: 'Daily load implied by each desired-retention target at equilibrium.',
+                    title: 'Anki’s workload estimate for each desired-retention target, relative to your current setting.',
                     x: 'Desired retention setting.',
-                    y: 'Daily load: reviews per day to sustain it.'
+                    y: 'Review time relative to the current setting, including relearning after lapses.'
                 },
                 'chart-load-intro': {
                     title: 'Current review load contributed by cards, grouped by when they were introduced.',

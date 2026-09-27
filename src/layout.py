@@ -93,8 +93,8 @@ def create_simulator_section():
         html.Div([
             html.Div([
                 html.H2('Forecast Simulator', className='section__title'),
-                html.P('Monte-Carlo projection from your current cards, using this '
-                       'deck’s FSRS parameters.', className='section__desc'),
+                html.P('Anki’s FSRS simulator, seeded with your current cards and '
+                       'this deck’s preset.', className='section__desc'),
             ]),
             html.Div([
                 _sim_input('Days', 'sim-days', 365, min=30, max=1825, step=1),

@@ -8,7 +8,6 @@ import sqlite3
 import pandas as pd
 import numpy as np
 import json
-import math
 from datetime import datetime, timedelta
 
 from src.config import get_db_path
@@ -19,14 +18,20 @@ def connect_db():
     return sqlite3.connect(get_db_path())
 
 
-def calculate_retrievability(stability: float, days_since_review: float) -> float:
+# FSRS-6 default decay (-w20), for presets without optimized params
+DEFAULT_DECAY = -0.1542
+
+
+def calculate_retrievability(stability: float, days_since_review: float,
+                             decay: float = DEFAULT_DECAY) -> float:
     """
-    Calculate FSRS retrievability using the standard formula:
-    R = exp(ln(0.9) * days_since_review / stability)
+    FSRS-6 forgetting curve: R = (1 + factor * t / S) ** decay,
+    factor = 0.9 ** (1 / decay) - 1 (so R = 0.9 when t = S).
     """
     if stability <= 0 or days_since_review < 0:
         return 0.0
-    return math.exp(math.log(0.9) * days_since_review / stability)
+    factor = 0.9 ** (1.0 / decay) - 1.0
+    return (1.0 + factor * days_since_review / stability) ** decay
 
 
 def parse_fsrs_data(data_json: str) -> dict | None:
@@ -236,6 +241,9 @@ def get_card_data(include_suspended: bool = True, deck_id: int | None = None) ->
     Returns:
         DataFrame with card-level statistics and FSRS metrics
     """
+    from .fsrs_engine import get_deck_fsrs_configs
+    deck_configs = get_deck_fsrs_configs()
+
     conn = connect_db()
     cursor = conn.cursor()
 
@@ -255,7 +263,8 @@ def get_card_data(include_suspended: bool = True, deck_id: int | None = None) ->
             c.reps,
             c.lapses,
             c.ivl,
-            c.due
+            c.due,
+            CASE WHEN c.odid THEN c.odid ELSE c.did END
         FROM cards c
         WHERE c.data IS NOT NULL
           AND c.data != ""
@@ -283,7 +292,7 @@ def get_card_data(include_suspended: bool = True, deck_id: int | None = None) ->
     card_types = []
 
     for row in rows:
-        card_id, data_json, card_type, queue, reps, lapses, ivl, due = row
+        card_id, data_json, card_type, queue, reps, lapses, ivl, due, home_did = row
         fsrs = parse_fsrs_data(data_json)
 
         if fsrs and 's' in fsrs and 'd' in fsrs:
@@ -296,7 +305,8 @@ def get_card_data(include_suspended: bool = True, deck_id: int | None = None) ->
             else:
                 days_since_review = 0
 
-            retrievability = calculate_retrievability(stability, days_since_review) * 100
+            decay = deck_configs.get(home_did, {}).get('decay', DEFAULT_DECAY)
+            retrievability = calculate_retrievability(stability, days_since_review, decay) * 100
 
             # Calculate scheduled date and overdue status
             scheduled_date = collection_start + timedelta(days=due)
@@ -481,8 +491,7 @@ def get_card_load(deck_id: int | None = None, use_stability: bool = False,
         cfgs = get_deck_fsrs_configs()
 
         def decay_of(did):
-            params = (cfgs.get(did) or {}).get('params')
-            return -(params[20] if params else 0.1542)
+            return (cfgs.get(did) or {}).get('decay', DEFAULT_DECAY)
 
         def rd_of(did):
             return (cfgs.get(did) or {}).get('desired_retention', 0.9)

@@ -215,8 +215,8 @@ def create_lapse_load_chart(df):
 
 def create_retention_workload_chart(data):
     """
-    Desired retention vs equilibrium reviews/day for the current collection.
-    Input from fsrs_engine.get_retention_workload_curve.
+    Desired retention vs Anki's workload estimate, relative to the current
+    setting. Input from fsrs_engine.get_retention_workload_curve.
     """
     curve = data['curve']
     if curve.empty:
@@ -226,26 +226,22 @@ def create_retention_workload_chart(data):
 
     fig.add_trace(go.Scatter(
         x=curve['retention'],
-        y=curve['reviews_per_day'],
+        y=curve['relative_workload'],
         mode='lines',
         line=dict(color=COLORS['warning'], width=2),
-        customdata=curve['avg_interval'],
-        hovertemplate=('Retention: %{x:.1%}<br>Reviews/day: %{y:.0f}'
-                       '<br>Avg interval: %{customdata:.0f}d<extra></extra>'),
+        hovertemplate='Retention: %{x:.0%}<br>Workload: %{y:.2f}× current<extra></extra>',
         showlegend=False,
     ))
 
-    # Mark the current desired-retention setting
+    # Mark the current desired-retention setting (1× by construction)
     current = data['current_retention']
-    idx = (curve['retention'] - current).abs().idxmin()
-    cur_load = curve.loc[idx, 'reviews_per_day']
     fig.add_trace(go.Scatter(
-        x=[curve.loc[idx, 'retention']],
-        y=[cur_load],
+        x=[current],
+        y=[1.0],
         mode='markers+text',
         marker=dict(color=COLORS['warning'], size=10, symbol='circle',
                     line=dict(color='#111217', width=2)),
-        text=[f'current: {current:.0%} → {cur_load:.0f}/day'],
+        text=[f'current: {current:.0%}'],
         textposition='top left',
         textfont=dict(color='#e0e0e0', size=10),
         hoverinfo='skip',
@@ -255,11 +251,11 @@ def create_retention_workload_chart(data):
     fig.update_layout(
         title='Retention ⇄ Workload Tradeoff',
         xaxis_title='Desired retention',
-        yaxis_title='Daily load (reviews/day)',
+        yaxis_title='Workload (× current, incl. relearning)',
         **DARK_CHART_LAYOUT,
     )
     fig.update_xaxes(tickformat='.0%', **DARK_CHART_AXIS)
-    fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
+    fig.update_yaxes(rangemode='tozero', ticksuffix='×', **DARK_CHART_AXIS)
 
     return fig
 
