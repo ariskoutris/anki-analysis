@@ -13,7 +13,9 @@ from dash import Input, Output, State, callback, clientside_callback, ctx, no_up
 from .config import DATA_DIR
 from .constants import COLORS, DARK_CHART_LAYOUT
 from .upload_handler import process_apkg_upload
-from .anki_sync import sync_from_anki, get_last_sync_time
+from anki.errors import SyncError
+
+from .anki_sync import sync_from_ankiweb, login, is_logged_in, get_last_sync_time
 from .layout import create_stat_item, DEFAULT_GRID_LAYOUT, sanitize_grid_item
 from .charts_session import (
     create_daily_reviews_chart,
@@ -418,33 +420,65 @@ def handle_backup_upload(contents, filename):
 
 
 # ---------------------------------------------------------------------------
-# Callback: Sync from Anki
+# Callbacks: Sync from AnkiWeb + login
 # ---------------------------------------------------------------------------
 
+_LOGIN_SHOWN = {'display': 'flex'}
+_LOGIN_HIDDEN = {'display': 'none'}
+
+
+def _sync_outputs():
+    """Run a sync; returns (toast text, toast style, interval disabled, n_intervals, refresh, login style)."""
+    success, message = sync_from_ankiweb(DATA_DIR)
+    login_style = _LOGIN_HIDDEN if is_logged_in(DATA_DIR) else _LOGIN_SHOWN
+    if success:
+        return message, _TOAST_SUCCESS, False, 0, time.time(), login_style
+    return message, _TOAST_ERROR, False, 0, no_update, login_style
+
+
+_SYNC_OUTPUTS = [
+    Output('upload-status-message', 'children', allow_duplicate=True),
+    Output('upload-status-message', 'style', allow_duplicate=True),
+    Output('upload-message-interval', 'disabled', allow_duplicate=True),
+    Output('upload-message-interval', 'n_intervals', allow_duplicate=True),
+    Output('backup-refresh-token', 'data', allow_duplicate=True),
+    Output('ankiweb-login', 'style'),
+]
+
+
 @callback(
-    [
-        Output('upload-status-message', 'children', allow_duplicate=True),
-        Output('upload-status-message', 'style', allow_duplicate=True),
-        Output('upload-message-interval', 'disabled', allow_duplicate=True),
-        Output('upload-message-interval', 'n_intervals', allow_duplicate=True),
-        Output('backup-refresh-token', 'data', allow_duplicate=True),
-    ],
+    _SYNC_OUTPUTS,
     [Input('sync-from-anki-button', 'n_clicks')],
+    [State('ankiweb-login', 'style')],
     prevent_initial_call=True
 )
-def handle_anki_sync(n_clicks):
-    """Sync Anki collection from local installation."""
+def handle_anki_sync(n_clicks, login_style):
+    """Sync from AnkiWeb, or toggle the login panel when no sync key is stored."""
     if not n_clicks:
-        return "", {'display': 'none'}, False, 0, no_update
+        return (no_update,) * 6
+    if not is_logged_in(DATA_DIR):
+        shown = (login_style or {}).get('display') != 'none'
+        return (no_update,) * 5 + (_LOGIN_HIDDEN if shown else _LOGIN_SHOWN,)
+    return _sync_outputs()
 
+
+@callback(
+    _SYNC_OUTPUTS + [Output('ankiweb-password', 'value')],
+    [Input('ankiweb-login-button', 'n_clicks'),
+     Input('ankiweb-password', 'n_submit')],
+    [State('ankiweb-email', 'value'),
+     State('ankiweb-password', 'value')],
+    prevent_initial_call=True
+)
+def handle_ankiweb_login(_clicks, _submits, email, password):
+    """Log in to AnkiWeb (stores only the sync key), then sync."""
+    if not email or not password:
+        return "Enter your AnkiWeb email and password.", _TOAST_ERROR, False, 0, no_update, no_update, no_update
     try:
-        success, message = sync_from_anki(DATA_DIR)
-        if success:
-            return message, _TOAST_SUCCESS, False, 0, time.time()
-        else:
-            return message, _TOAST_ERROR, False, 0, no_update
-    except Exception as e:
-        return f"Sync error: {str(e)}", _TOAST_ERROR, False, 0, no_update
+        login(DATA_DIR, email.strip(), password)
+    except SyncError as e:
+        return f"AnkiWeb login failed: {e}", _TOAST_ERROR, False, 0, no_update, no_update, ''
+    return _sync_outputs() + ('',)
 
 
 # ---------------------------------------------------------------------------
@@ -458,10 +492,10 @@ def handle_anki_sync(n_clicks):
      Input('url', 'pathname')],
 )
 def update_last_sync_indicator(_refresh_token, _url):
-    """Show when the last successful Anki sync happened (uploads don't count)."""
+    """Show when the last successful AnkiWeb sync happened (uploads don't count)."""
     ts = get_last_sync_time(DATA_DIR)
     if ts is None:
-        return 'Never synced', 'No successful sync from Anki recorded'
+        return 'Never synced', 'No successful sync from AnkiWeb recorded'
 
     synced = datetime.fromtimestamp(ts)
     days_ago = (datetime.now().date() - synced.date()).days
@@ -471,7 +505,7 @@ def update_last_sync_indicator(_refresh_token, _url):
         when = f"yesterday {synced:%H:%M}"
     else:
         when = f"{synced:%b} {synced.day}"
-    return f"Synced {when}", f"Last successful sync from Anki: {synced:%Y-%m-%d %H:%M}"
+    return f"Synced {when}", f"Last successful sync from AnkiWeb: {synced:%Y-%m-%d %H:%M}"
 
 
 # ---------------------------------------------------------------------------

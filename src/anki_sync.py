@@ -1,166 +1,54 @@
 """
-Anki Sync Module
-Handles direct synchronization with local Anki installation.
+AnkiWeb Sync Module
+Downloads the full collection from AnkiWeb into data/anki.db.
+
+Login happens once with email + password; only the returned sync key is kept
+(data/ankiweb.json). Every sync is a one-way full download, so nothing is ever
+sent back to AnkiWeb.
 """
 
-import os
-import platform
-import shutil
-import subprocess
-import filecmp
 import json
+import os
+import sqlite3
+import tempfile
 import time
 from pathlib import Path
-from typing import Tuple, List, Optional
+from typing import Tuple, Optional
 
-from .upload_handler import (
-    decompress_anki21b,
-    validate_database,
-)
+from anki.collection import Collection
+from anki.errors import SyncError, SyncErrorKind
+from anki.sync_pb2 import SyncAuth
 
-
-def get_anki_base_path() -> Optional[Path]:
-    """
-    Get the base Anki2 directory based on the operating system.
-
-    Returns:
-        Path to Anki2 directory or None if not found
-    """
-    env_base = os.environ.get("ANKI_BASE")
-    if env_base:
-        p = Path(env_base).expanduser()
-        return p if p.exists() else None
-
-    system = platform.system()
-    home = Path.home()
-
-    if system == "Linux":
-        xdg = os.environ.get("XDG_DATA_HOME")
-        base = Path(xdg).expanduser() if xdg else home / ".local" / "share"
-        path = base / "Anki2"
-    elif system == "Darwin":  # macOS
-        path = home / "Library" / "Application Support" / "Anki2"
-    elif system == "Windows":
-        appdata = os.environ.get("APPDATA")
-        if not appdata:
-            return None
-        path = Path(appdata) / "Anki2"
-    else:
-        return None
-
-    return path if path.exists() else None
-
-
-def get_anki_profiles() -> List[Tuple[str, Path]]:
-    """
-    Get all Anki profiles (users) with their collection paths.
-
-    Returns:
-        List of tuples: (profile_name, collection_path)
-    """
-    base_path = get_anki_base_path()
-    if not base_path:
-        return []
-
-    profiles = []
-    try:
-        for item in base_path.iterdir():
-            if not item.is_dir():
-                continue
-
-            # Check for both collection formats:
-            # - collection.anki21b (newer compressed format)
-            # - collection.anki2 (older SQLite format)
-            collection_anki21b = item / "collection.anki21b"
-            collection_anki2 = item / "collection.anki2"
-
-            if collection_anki21b.exists():
-                profiles.append((item.name, collection_anki21b))
-            elif collection_anki2.exists():
-                profiles.append((item.name, collection_anki2))
-    except (PermissionError, OSError):
-        return []
-
-    return profiles
-
-
-def is_anki_running() -> bool:
-    """
-    Check if Anki is currently running to avoid database conflicts.
-
-    Returns:
-        True if Anki appears to be running, False otherwise
-    """
-    system = platform.system()
-
-    try:
-        if system == "Darwin":
-            # macOS: Anki may run as a .app bundle or as a Python process via aqt
-            for pattern in ["Anki.app/Contents/MacOS", "aqt.run()"]:
-                result = subprocess.run(
-                    ["pgrep", "-f", pattern],
-                    capture_output=True,
-                    text=True
-                )
-                if result.stdout.strip():
-                    return True
-            return False
-        elif system == "Linux":
-            result = subprocess.run(
-                ["pgrep", "-xi", "anki"],
-                capture_output=True,
-                text=True
-            )
-            if not result.stdout.strip():
-                result = subprocess.run(
-                    ["pgrep", "-xi", "anki.bin"],
-                    capture_output=True,
-                    text=True
-                )
-            return bool(result.stdout.strip())
-        elif system == "Windows":
-            result = subprocess.run(
-                ["tasklist", "/FI", "IMAGENAME eq anki.exe"],
-                capture_output=True,
-                text=True
-            )
-            return "anki.exe" in result.stdout.lower()
-    except (FileNotFoundError, subprocess.SubprocessError):
-        # If we can't check, assume it's not running
-        pass
-
-    return False
-
-
-def check_collection_lock(collection_path: Path) -> bool:
-    """
-    Check if the Anki collection has an active lock file.
-
-    Args:
-        collection_path: Path to collection.anki21b
-
-    Returns:
-        True if locked (Anki is using it), False otherwise
-    """
-    # Anki typically creates collection.anki21b.lock or similar
-    lock_patterns = [
-        collection_path.parent / f"{collection_path.name}.lock",
-        collection_path.parent / ".lock",
-    ]
-
-    for lock_file in lock_patterns:
-        if lock_file.exists():
-            return True
-
-    return False
-
+from .upload_handler import validate_database
 
 LAST_SYNC_FILE = "last_sync.json"
+AUTH_FILE = "ankiweb.json"
+
+
+def is_logged_in(data_root: str) -> bool:
+    return (Path(data_root) / AUTH_FILE).exists()
+
+
+def login(data_root: str, email: str, password: str) -> None:
+    """Exchange AnkiWeb credentials for a sync key and store the key. Raises SyncError."""
+    with tempfile.TemporaryDirectory() as tmp:
+        col = Collection(os.path.join(tmp, "collection.anki2"))
+        try:
+            auth = col.sync_login(email, password, None)
+        finally:
+            col.close()
+    auth_path = Path(data_root) / AUTH_FILE
+    auth_path.touch(mode=0o600)
+    auth_path.write_text(json.dumps({"hkey": auth.hkey}))
+
+
+def logout(data_root: str) -> None:
+    (Path(data_root) / AUTH_FILE).unlink(missing_ok=True)
 
 
 def get_last_sync_time(data_root: str) -> Optional[float]:
     """
-    Read the timestamp of the last successful Anki sync.
+    Read the timestamp of the last successful AnkiWeb sync.
 
     Returns:
         Seconds since epoch, or None if no sync has been recorded
@@ -172,107 +60,53 @@ def get_last_sync_time(data_root: str) -> Optional[float]:
         return None
 
 
-def sync_from_anki(data_root: str) -> Tuple[bool, str]:
+def sync_from_ankiweb(data_root: str) -> Tuple[bool, str]:
     """
-    Sync the first Anki profile's collection from the local install to data/anki.db.
-    Records the time of every successful sync in data/last_sync.json
-    (an unchanged collection counts as success: the snapshot is current).
+    Download the collection from AnkiWeb into data/anki.db and record the time
+    of every successful sync in data/last_sync.json.
 
     Returns:
         (success: bool, message: str)
     """
-    success, message = _sync_from_anki(data_root)
-    if success:
-        # Best-effort: failing to record the time must not fail the sync
-        try:
-            (Path(data_root) / LAST_SYNC_FILE).write_text(
-                json.dumps({"timestamp": time.time()}))
-        except OSError:
-            pass
-    return success, message
+    if not is_logged_in(data_root):
+        return False, "Log in to AnkiWeb to sync"
 
-
-def _sync_from_anki(data_root: str) -> Tuple[bool, str]:
-    """Copy the Anki collection into data/anki.db (see sync_from_anki)."""
-    # Check if Anki is installed
-    base_path = get_anki_base_path()
-    if not base_path:
-        return False, "Anki installation not found on this system"
-
-    # Get available profiles
-    profiles = get_anki_profiles()
-    if not profiles:
-        return False, f"No Anki profiles found in {base_path}"
-
-    selected_profile, collection_path = profiles[0]
-
-    # Safety check: Warn if Anki is running
-    if is_anki_running():
-        return False, (
-            "Anki appears to be running. Please close Anki before syncing "
-            "to avoid database conflicts."
-        )
-
-    # Check for collection lock
-    if check_collection_lock(collection_path):
-        return False, (
-            "Anki collection is locked. Please close Anki and try again."
-        )
-
-    data_path = Path(data_root)
-    target_db = data_path / "anki.db"
-    staging_db = data_path / ".anki.db.tmp"
-
+    auth = SyncAuth(hkey=json.loads((Path(data_root) / AUTH_FILE).read_text())["hkey"])
     try:
-        # Fast path: if source collection is unchanged, skip
-        if target_db.exists() and collection_path.name == "collection.anki21b":
-            # Compare source collection to a cached copy if present
-            cached_source = data_path / ".collection.anki21b.cache"
-            if cached_source.exists() and filecmp.cmp(collection_path, cached_source, shallow=False):
-                return True, f"No changes detected for Anki profile '{selected_profile}'."
+        with tempfile.TemporaryDirectory(dir=data_root) as tmp:
+            staging_db = os.path.join(tmp, "collection.anki2")
+            col = Collection(staging_db)
+            try:
+                # Each account lives on its own sync server; the status call reports which
+                status = col.sync_status(auth)
+                if status.HasField("new_endpoint"):
+                    auth.endpoint = status.new_endpoint
+                col.close_for_full_sync()
+                col.full_upload_or_download(auth=auth, server_usn=None, upload=False)
+            finally:
+                col.close()
 
-        # Ensure data directory exists
-        data_path.mkdir(parents=True, exist_ok=True)
+            # Anki leaves the file in WAL mode; a stale anki.db-wal next to the
+            # swapped-in file could otherwise be replayed onto it
+            with sqlite3.connect(staging_db) as conn:
+                conn.execute("PRAGMA journal_mode=DELETE")
+            conn.close()
 
-        if collection_path.name == "collection.anki21b":
-            # Copy source, decompress, validate
-            temp_source = data_path / ".collection.anki21b.tmp"
-            shutil.copy2(collection_path, temp_source)
-
-            success, decompress_msg = decompress_anki21b(str(temp_source), str(staging_db))
-            if not success:
-                temp_source.unlink(missing_ok=True)
-                staging_db.unlink(missing_ok=True)
-                return False, f"Decompression failed: {decompress_msg}"
-
-            valid, validate_msg = validate_database(str(staging_db))
+            valid, validate_msg = validate_database(staging_db)
             if not valid:
-                temp_source.unlink(missing_ok=True)
-                staging_db.unlink(missing_ok=True)
-                return False, f"Database validation failed: {validate_msg}"
-
-            # Swap into place atomically
-            os.replace(str(staging_db), str(target_db))
-
-            # Cache the source for fast-path comparison next time
-            cached_source = data_path / ".collection.anki21b.cache"
-            os.replace(str(temp_source), str(cached_source))
-        else:
-            # collection.anki2 — already a plain SQLite file
-            shutil.copy2(collection_path, staging_db)
-
-            valid, validate_msg = validate_database(str(staging_db))
-            if not valid:
-                staging_db.unlink(missing_ok=True)
-                return False, f"Database validation failed: {validate_msg}"
-
-            os.replace(str(staging_db), str(target_db))
-
-        return True, f"Successfully synced Anki profile '{selected_profile}'"
-
-    except PermissionError as e:
-        staging_db.unlink(missing_ok=True)
-        return False, f"Permission error: {str(e)}"
+                return False, f"Downloaded collection is invalid: {validate_msg}"
+            os.replace(staging_db, Path(data_root) / "anki.db")
+    except SyncError as e:
+        if e.kind == SyncErrorKind.AUTH:
+            logout(data_root)
+            return False, "AnkiWeb login expired. Log in again."
+        return False, f"AnkiWeb sync failed: {e}"
     except Exception as e:
-        staging_db.unlink(missing_ok=True)
-        return False, f"Sync error: {str(e)}"
+        return False, f"AnkiWeb sync failed: {e}"
+
+    # Best-effort: failing to record the time must not fail the sync
+    try:
+        (Path(data_root) / LAST_SYNC_FILE).write_text(json.dumps({"timestamp": time.time()}))
+    except OSError:
+        pass
+    return True, "Synced from AnkiWeb"

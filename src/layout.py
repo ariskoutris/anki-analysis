@@ -277,12 +277,12 @@ def create_main_layout():
 
                     # Actions
                     html.Div([
-                        # Last successful Anki sync (populated by callback)
+                        # Last successful AnkiWeb sync (populated by callback)
                         html.Span(id='last-sync-indicator', className='top-bar__label'),
                         html.Button(
                             'Sync',
                             id='sync-from-anki-button',
-                            title='Sync from local Anki',
+                            title='Sync from AnkiWeb',
                             style={
                                 'padding': '4px 12px',
                                 'backgroundColor': COLORS['success'],
@@ -314,6 +314,18 @@ def create_main_layout():
                         ),
                     ], className='top-bar__actions'),
                 ], className='top-bar__controls'),
+
+                # AnkiWeb login (shown by the Sync button when no sync key is stored)
+                html.Div([
+                    html.Div('Log in to AnkiWeb', className='login-panel__title'),
+                    dcc.Input(id='ankiweb-email', type='email', placeholder='Email',
+                              className='sim-input__field login-panel__field'),
+                    dcc.Input(id='ankiweb-password', type='password', placeholder='Password',
+                              className='sim-input__field login-panel__field'),
+                    html.Button('Log in and sync', id='ankiweb-login-button', className='sim-run-btn'),
+                    html.Div('Only a sync key is stored, never your password.',
+                             className='login-panel__note'),
+                ], id='ankiweb-login', className='login-panel', style={'display': 'none'}),
 
                 # Toast status message
                 html.Div(id='upload-status-message', className='toast-msg', style={'display': 'none'}),

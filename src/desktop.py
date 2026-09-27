@@ -3,7 +3,7 @@
 Desktop entry point: runs the dashboard inside a native window (pywebview).
 
 The window opens immediately on a loading screen; the Dash app is imported
-(which triggers the Anki auto-sync) and served on a free local port in a
+(which triggers the AnkiWeb auto-sync) and served on a free local port in a
 background thread. Closing the window exits the process and the server with it.
 
 Run with:  uv run python -m src.desktop
@@ -29,7 +29,7 @@ LOADING_HTML = f"""
   <div style="width:28px;height:28px;border:3px solid {COLORS['border']};
     border-top-color:{COLORS['primary']};border-radius:50%;
     animation:spin .8s linear infinite"></div>
-  <p style="margin-top:18px">Syncing from Anki and loading dashboard…</p>
+  <p style="margin-top:18px">Syncing from AnkiWeb and loading dashboard…</p>
   <style>@keyframes spin {{ to {{ transform: rotate(360deg) }} }}</style>
 </body></html>
 """

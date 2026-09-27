@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Interactive Plotly Dash dashboard for analysing Anki flashcard reviews on FSRS-enabled decks. Auto-syncs from local Anki on startup; also supports manual sync and .apkg upload.
+Interactive Plotly Dash dashboard for analysing Anki flashcard reviews on FSRS-enabled decks. Auto-syncs from AnkiWeb on startup (once logged in); also supports manual sync and .apkg upload.
 
 ## File map
 
@@ -18,10 +18,10 @@ src/
   charts_session.py         – 5 session chart functions + session-mode helpers
   charts_card.py            – 9 card/analytics chart functions (pure: DataFrame → Figure)
   upload_handler.py         – .apkg file upload processing
-  anki_sync.py              – Sync from local Anki install → data/anki.db; records last successful sync in data/last_sync.json (`get_last_sync_time()`)
+  anki_sync.py              – AnkiWeb login + full download → data/anki.db via the `anki` package; sync key in data/ankiweb.json, last successful sync in data/last_sync.json (`get_last_sync_time()`)
   data_loader.py            – All SQL queries, FSRS calculations, DataFrame construction, summary stats
   fsrs_engine.py            – FSRS history replay (py-fsrs) + advanced analytics (see below)
-pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly, fsrs, pywebview); managed with uv
+pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly, fsrs, pywebview, anki); managed with uv
 uv.lock                     – Pinned dependency lockfile
 scripts/install-launcher.sh – Builds ~/Applications/Anki Dashboard.app (macOS) pointing at this checkout
 assets/icon.png             – 1024px app icon (converted to .icns by the install script)
@@ -35,7 +35,7 @@ data/                       – Not tracked. Contains single anki.db snapshot
 ```
 .apkg file → upload via UI → data/anki.db
    or
-Anki install → auto-sync on startup → data/anki.db
+AnkiWeb → auto-sync on startup / Sync button → data/anki.db
                                    ↓
                             src/data_loader.py   (SQL → pandas DataFrames)
                                    ↓
@@ -144,7 +144,7 @@ Layout builders:
 - `create_section_container(title, description, content_id, summary_id)` – section wrapper with header and optional summary area
 - `create_session_tab()` – session tab layout with 3 sections (volume, effectiveness, workload)
 - `create_cards_tab()` – card tab layout with 3 sections (knowledge, maturity, problems)
-- `create_main_layout()` – assembles the full page layout (top bar includes the `last-sync-indicator` span next to Sync/Upload)
+- `create_main_layout()` – assembles the full page layout (top bar includes the `last-sync-indicator` span next to Sync/Upload, plus the hidden `ankiweb-login` panel)
 
 ### charts_session.py
 
@@ -168,7 +168,8 @@ All `@callback` functions + `parse_time_range` utility:
 | `toggle_xaxis_mode` | x-axis buttons / `url` | Toggles dates ↔ sessions mode |
 | `save_ui_to_store` | any filter change | Persists preferences to localStorage |
 | `handle_backup_upload` | upload button | Processes .apkg uploads → data/anki.db |
-| `handle_anki_sync` | sync button | Syncs from local Anki → data/anki.db |
+| `handle_anki_sync` | sync button | Syncs from AnkiWeb → data/anki.db; toggles the login panel when not logged in |
+| `handle_ankiweb_login` | login button / Enter in password | Stores AnkiWeb sync key, then syncs |
 | `update_last_sync_indicator` | `backup-refresh-token` / `url` | "Synced today HH:MM" / "Never synced" from data/last_sync.json (only successful Anki syncs, not uploads) |
 | `auto_dismiss_upload_message` | interval | Hides upload status after 2s |
 | `update_session_charts` | time-range / xaxis-mode / refresh-token | Rebuilds all 3 session sections (summaries + charts) |
@@ -177,7 +178,7 @@ All `@callback` functions + `parse_time_range` utility:
 ### app.py
 
 Slim orchestrator:
-1. Auto-sync from local Anki (silently skips on failure)
+1. Auto-sync from AnkiWeb (skips when not logged in or offline)
 2. `app = dash.Dash(...)` + `app.index_string = INDEX_STRING`
 3. `app.layout = create_main_layout()` (no arguments)
 4. Side-effect import of `callbacks` (registers all `@callback` decorators)

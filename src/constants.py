@@ -253,6 +253,25 @@ INDEX_STRING = '''
                 box-shadow: 0 4px 12px rgba(0,0,0,0.5);
             }
 
+            /* AnkiWeb login panel */
+            .login-panel {
+                position: fixed;
+                top: 48px;
+                right: 12px;
+                z-index: 999;
+                width: 240px;
+                flex-direction: column;
+                gap: 8px;
+                padding: 14px;
+                background: #111217;
+                border: 1px solid #2a2d3a;
+                border-radius: 4px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            }
+            .login-panel__title { font-size: 13px; font-weight: 600; color: #e0e0e0; }
+            .login-panel__field { width: 100%; box-sizing: border-box; }
+            .login-panel__note { font-size: 11px; color: #5a5e72; }
+
             /* ---- Dash component dark overrides ---- */
 
             /* Dropdown button */

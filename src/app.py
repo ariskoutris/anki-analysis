@@ -9,16 +9,16 @@ import dash
 
 from .constants import INDEX_STRING
 from .layout import create_main_layout
-from .anki_sync import sync_from_anki
+from .anki_sync import sync_from_ankiweb
 from .config import DATA_DIR
 
 # ---------------------------------------------------------------------------
-# 1. Auto-sync from Anki on startup
+# 1. Auto-sync from AnkiWeb on startup
 # ---------------------------------------------------------------------------
 os.makedirs(DATA_DIR, exist_ok=True)
 
 try:
-    success, message = sync_from_anki(DATA_DIR)
+    success, message = sync_from_ankiweb(DATA_DIR)
     if success:
         print(f"  Auto-sync: {message}")
     else:
