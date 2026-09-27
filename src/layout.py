@@ -53,6 +53,19 @@ def sanitize_grid_item(stored: dict, default: dict) -> dict:
     return {'i': default['i'], 'x': x, 'y': y, 'w': w, 'h': 1, **_GRID_CONSTRAINTS}
 
 
+def segmented_styles(left_active):
+    """Styles for a two-button segmented toggle (left, right)."""
+    base = {'padding': '4px 12px', 'cursor': 'pointer', 'fontSize': '12px',
+            'fontWeight': '500', 'lineHeight': '1.4'}
+    active = {**base, 'border': f'1px solid {COLORS["primary"]}',
+              'backgroundColor': COLORS['primary'], 'color': '#fff'}
+    inactive = {**base, 'border': f'1px solid {COLORS["border"]}',
+                'backgroundColor': COLORS['bg_secondary'], 'color': COLORS['text_secondary']}
+    left, right = (active, inactive) if left_active else (inactive, active)
+    return ({**left, 'borderRadius': '3px 0 0 3px'},
+            {**right, 'borderRadius': '0 3px 3px 0', 'borderLeft': 'none'})
+
+
 def _grid_chart(wrapper_id):
     """A draggable/resizable grid item wrapping one chart."""
     chart_id = wrapper_id.removeprefix('w-')
@@ -181,39 +194,8 @@ def create_main_layout():
 
                     # X-axis toggle
                     html.Div([
-                        html.Button(
-                            'Dates',
-                            id='xaxis-dates-btn',
-                            n_clicks=0,
-                            style={
-                                'padding': '4px 12px',
-                                'border': f'1px solid {COLORS["border"]}',
-                                'borderRadius': '3px 0 0 3px',
-                                'backgroundColor': COLORS['primary'],
-                                'color': '#fff',
-                                'cursor': 'pointer',
-                                'fontSize': '12px',
-                                'fontWeight': '500',
-                                'lineHeight': '1.4',
-                            },
-                        ),
-                        html.Button(
-                            'Sessions',
-                            id='xaxis-sessions-btn',
-                            n_clicks=0,
-                            style={
-                                'padding': '4px 12px',
-                                'border': f'1px solid {COLORS["border"]}',
-                                'borderLeft': 'none',
-                                'borderRadius': '0 3px 3px 0',
-                                'backgroundColor': COLORS['bg_secondary'],
-                                'color': COLORS['text_secondary'],
-                                'cursor': 'pointer',
-                                'fontSize': '12px',
-                                'fontWeight': '500',
-                                'lineHeight': '1.4',
-                            },
-                        ),
+                        html.Button('Dates', id='xaxis-dates-btn', n_clicks=0, style=segmented_styles(True)[0]),
+                        html.Button('Sessions', id='xaxis-sessions-btn', n_clicks=0, style=segmented_styles(True)[1]),
                     ], style={'display': 'flex'}),
 
                     html.Div(className='top-bar__separator'),
@@ -222,39 +204,8 @@ def create_main_layout():
                     html.Div([
                         html.Span('Load', className='top-bar__label'),
                         html.Div([
-                            html.Button(
-                                'Interval',
-                                id='load-interval-btn',
-                                n_clicks=0,
-                                style={
-                                    'padding': '4px 12px',
-                                    'border': f'1px solid {COLORS["primary"]}',
-                                    'borderRadius': '3px 0 0 3px',
-                                    'backgroundColor': COLORS['primary'],
-                                    'color': '#fff',
-                                    'cursor': 'pointer',
-                                    'fontSize': '12px',
-                                    'fontWeight': '500',
-                                    'lineHeight': '1.4',
-                                },
-                            ),
-                            html.Button(
-                                'Stability',
-                                id='load-stability-btn',
-                                n_clicks=0,
-                                style={
-                                    'padding': '4px 12px',
-                                    'border': f'1px solid {COLORS["border"]}',
-                                    'borderLeft': 'none',
-                                    'borderRadius': '0 3px 3px 0',
-                                    'backgroundColor': COLORS['bg_secondary'],
-                                    'color': COLORS['text_secondary'],
-                                    'cursor': 'pointer',
-                                    'fontSize': '12px',
-                                    'fontWeight': '500',
-                                    'lineHeight': '1.4',
-                                },
-                            ),
+                            html.Button('Interval', id='load-interval-btn', n_clicks=0, style=segmented_styles(True)[0]),
+                            html.Button('Stability', id='load-stability-btn', n_clicks=0, style=segmented_styles(True)[1]),
                         ], style={'display': 'flex'}),
                     ], className='top-bar__group'),
 

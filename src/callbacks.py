@@ -16,7 +16,7 @@ from .upload_handler import process_apkg_upload
 from anki.errors import SyncError
 
 from .anki_sync import sync_from_ankiweb, login, is_logged_in, get_last_sync_time
-from .layout import create_stat_item, DEFAULT_GRID_LAYOUT, sanitize_grid_item
+from .layout import create_stat_item, DEFAULT_GRID_LAYOUT, sanitize_grid_item, segmented_styles
 from .charts_session import (
     create_daily_reviews_chart,
     create_hourly_chart,
@@ -45,7 +45,6 @@ from .data_loader import (
     get_card_data,
     get_future_load_forecast,
     get_overview_stats,
-    get_memory_state_summary,
     get_session_summary_stats,
     get_workload_summary,
     calculate_daily_load,
@@ -71,6 +70,11 @@ def parse_time_range(time_range):
     return int(time_range) if time_range and time_range != 'all' else None
 
 
+def parse_deck(deck_value):
+    """Deck dropdown value -> deck id (None = all decks)."""
+    return None if deck_value == 'all' else int(deck_value)
+
+
 # Toast colours; position and shape come from the .toast-msg CSS class
 def _toast(color, bg):
     return {'display': 'block', 'color': color, 'backgroundColor': bg,
@@ -79,19 +83,6 @@ def _toast(color, bg):
 
 _TOAST_SUCCESS = _toast(COLORS['success'], '#162312')
 _TOAST_ERROR = _toast(COLORS['danger'], '#2a1215')
-
-
-def _segmented_styles(left_active):
-    """Styles for a two-button segmented toggle (left, right)."""
-    base = {'padding': '4px 12px', 'cursor': 'pointer', 'fontSize': '12px',
-            'fontWeight': '500', 'lineHeight': '1.4'}
-    active = {**base, 'border': f'1px solid {COLORS["primary"]}',
-              'backgroundColor': COLORS['primary'], 'color': '#fff'}
-    inactive = {**base, 'border': f'1px solid {COLORS["border"]}',
-                'backgroundColor': COLORS['bg_secondary'], 'color': COLORS['text_secondary']}
-    left, right = (active, inactive) if left_active else (inactive, active)
-    return ({**left, 'borderRadius': '3px 0 0 3px'},
-            {**right, 'borderRadius': '0 3px 3px 0', 'borderLeft': 'none'})
 
 
 _EMPTY_FIG = go.Figure(layout=dict(
@@ -129,10 +120,11 @@ _EMPTY_FIG = go.Figure(layout=dict(
 )
 def update_overview_container(_refresh_token, _url, deck_value, load_basis):
     """Populate the stat strip with current metrics."""
-    deck_id = None if deck_value == 'all' else int(deck_value)
+    deck_id = parse_deck(deck_value)
     use_stability = (load_basis == 'stability')
     stats = get_overview_stats(deck_id=deck_id)
-    memory = get_memory_state_summary(deck_id=deck_id)
+    ret = get_card_data(deck_id=deck_id)['retrievability']
+    mean_ret = float(ret.mean()) if len(ret) else 0.0
     workload = get_workload_summary(deck_id=deck_id)
     session_stats = get_session_summary_stats(deck_id=deck_id)
 
@@ -167,8 +159,8 @@ def update_overview_container(_refresh_token, _url, deck_value, load_basis):
     cards_learned = create_stat_item(
         f"{stats['review_cards']:,}", 'Cards Learned', COLORS['text_secondary'], secondary=True)
     avg_ret = create_stat_item(
-        f"{memory['mean_retrievability']:.0f}%", 'Avg Ret.',
-        COLORS['success'] if memory['mean_retrievability'] >= 80 else COLORS['warning'],
+        f"{mean_ret:.0f}%", 'Avg Ret.',
+        COLORS['success'] if mean_ret >= 80 else COLORS['warning'],
         secondary=True)
     daily_load = create_stat_item(
         f"{calculate_daily_load(deck_id=deck_id, use_stability=use_stability):.1f}",
@@ -341,7 +333,7 @@ def toggle_xaxis_mode(dates_clicks, sessions_clicks, _, ui_store):
     else:
         mode = 'sessions'
 
-    return (mode, *_segmented_styles(mode == 'dates'))
+    return (mode, *segmented_styles(mode == 'dates'))
 
 
 @callback(
@@ -364,7 +356,7 @@ def toggle_load_basis(_interval_clicks, _stability_clicks, _, ui_store):
     else:
         basis = 'interval'
 
-    return (basis, *_segmented_styles(basis == 'interval'))
+    return (basis, *segmented_styles(basis == 'interval'))
 
 
 # ---------------------------------------------------------------------------
@@ -552,7 +544,7 @@ def auto_dismiss_upload_message(n):
 )
 def sync_sim_defaults_from_preset(deck_value, _url):
     """Auto-fill the simulator inputs from the selected deck's Anki preset."""
-    deck_id = None if deck_value == 'all' else int(deck_value)
+    deck_id = parse_deck(deck_value)
     d = get_deck_sim_defaults(deck_id)
     return d['retention'], d['new_per_day'], d['rev_per_day']
 
@@ -570,7 +562,7 @@ def sync_sim_defaults_from_preset(deck_value, _url):
 )
 def run_forecast_simulation(_n, days, retention, new_per_day, max_reviews, deck_value):
     """Run the FSRS forward simulation and render the projection charts."""
-    deck_id = None if deck_value == 'all' else int(deck_value)
+    deck_id = parse_deck(deck_value)
     days = int(days or 365)
     retention = min(max(float(retention or 90) / 100.0, 0.70), 0.97)
     new_per_day = max(int(new_per_day or 0), 0)
@@ -599,14 +591,13 @@ def run_forecast_simulation(_n, days, retention, new_per_day, max_reviews, deck_
      Input('xaxis-mode', 'data'),
      Input('backup-refresh-token', 'data'),
      Input('deck-filter', 'value')],
-    [State('ui-store', 'data')],
     prevent_initial_call=False
 )
-def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value, ui_store):
+def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value):
     """Update session charts based on time range and x-axis mode."""
     use_sessions = (xaxis_mode == 'sessions')
     review_days = parse_time_range(time_range)
-    deck_id = None if deck_value == 'all' else int(deck_value)
+    deck_id = parse_deck(deck_value)
     forecast_days = 365
 
     session_df = get_session_data(review_days, deck_id=deck_id)
@@ -648,12 +639,11 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value, ui
      Input('session-time-range', 'value'),
      Input('xaxis-mode', 'data'),
      Input('load-basis', 'data')],
-    [State('ui-store', 'data')],
     prevent_initial_call=False
 )
-def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode, load_basis, ui_store):
+def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode, load_basis):
     """Update card charts based on filters, date range and x-axis mode."""
-    deck_id = None if deck_value == 'all' else int(deck_value)
+    deck_id = parse_deck(deck_value)
     use_sessions = (xaxis_mode == 'sessions')
     use_stability = (load_basis == 'stability')
     review_days = parse_time_range(time_range)

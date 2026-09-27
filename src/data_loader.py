@@ -115,17 +115,9 @@ def get_session_data(review_days: int | None = None, deck_id: int | None = None)
     query = f"""
         SELECT
             date(r.id/1000, 'unixepoch', 'localtime') as session_date,
-            CAST(strftime('%H', datetime(r.id/1000, 'unixepoch', 'localtime')) AS INTEGER) as session_hour,
             COUNT(*) as total_cards,
-            COUNT(CASE WHEN r.type = 0 THEN 1 END) as new_cards,
-            COUNT(CASE WHEN r.type = 1 THEN 1 END) as review_cards,
-            COUNT(CASE WHEN r.type = 2 THEN 1 END) as relearn_cards,
             SUM(CASE WHEN r.ease >= 2 THEN 1 ELSE 0 END) as successful_cards,
-            SUM(CASE WHEN r.ease < 2 THEN 1 ELSE 0 END) as failed_cards,
-            AVG(r.time)/1000.0 as avg_time_per_card,
-            SUM(r.time)/1000.0/60.0 as total_session_minutes,
-            MIN(r.id/1000) as session_start_timestamp,
-            MAX(r.id/1000) as session_end_timestamp
+            SUM(r.time)/1000.0/60.0 as total_session_minutes
         FROM revlog r
         JOIN cards c ON r.cid = c.id
         WHERE r.id > 0
@@ -144,20 +136,9 @@ def get_session_data(review_days: int | None = None, deck_id: int | None = None)
     if df.empty:
         return df
 
-    # Calculate derived metrics
     df['date'] = pd.to_datetime(df['session_date'])
     df['success_rate'] = (df['successful_cards'] / df['total_cards'] * 100).round(1)
     df['cards_per_minute'] = (df['total_cards'] / df['total_session_minutes']).replace([np.inf, -np.inf], 0)
-    df['new_card_ratio'] = (df['new_cards'] / df['total_cards'] * 100).round(1)
-    df['session_duration'] = (df['session_end_timestamp'] - df['session_start_timestamp']) / 60.0
-
-    # Efficiency score: success per time spent
-    df['efficiency_score'] = np.where(
-        (df['total_cards'] > 0) & (df['avg_time_per_card'] > 0),
-        df['successful_cards'] / df['total_cards'] / (df['avg_time_per_card'] / 10),
-        0
-    )
-
     return df
 
 
@@ -171,7 +152,6 @@ def get_hourly_stats(review_days: int | None = None, deck_id: int | None = None)
     query = f"""
         SELECT
             CAST(strftime('%H', datetime(r.id/1000, 'unixepoch', 'localtime')) AS INTEGER) as hour,
-            AVG(r.time)/1000.0 as avg_time_seconds,
             AVG(CASE WHEN r.ease >= 2 THEN 1.0 ELSE 0.0 END) * 100 as success_rate,
             COUNT(*) as review_count
         FROM revlog r
@@ -203,8 +183,7 @@ def get_daily_reviews(review_days: int | None = None, deck_id: int | None = None
         SELECT
             date(r.id/1000, 'unixepoch', 'localtime') as review_date,
             COUNT(*) as daily_reviews,
-            SUM(CASE WHEN r.ease >= 2 THEN 1 ELSE 0 END) as daily_success,
-            SUM(r.time)/1000.0/60.0 as daily_minutes
+            SUM(CASE WHEN r.ease >= 2 THEN 1 ELSE 0 END) as daily_success
         FROM revlog r
         JOIN cards c ON r.cid = c.id
         WHERE r.id > 0
@@ -230,121 +209,46 @@ def get_daily_reviews(review_days: int | None = None, deck_id: int | None = None
 # CARD DATA
 # =============================================================================
 
-def get_card_data(include_suspended: bool = True, deck_id: int | None = None) -> pd.DataFrame:
+def get_card_data(deck_id: int | None = None) -> pd.DataFrame:
     """
-    Get comprehensive card-level data with FSRS parameters.
-
-    Parameters:
-        include_suspended: Whether to include suspended cards (default True, matching Anki)
-        deck_id: Only include cards from this deck (None = all decks)
-
-    Returns:
-        DataFrame with card-level statistics and FSRS metrics
+    Learning/review cards (suspended included, matching Anki) with FSRS
+    memory state from cards.data. Returns DataFrame[stability, difficulty,
+    retrievability (%), days_overdue, is_suspended].
     """
     from .fsrs_engine import get_deck_fsrs_configs
     deck_configs = get_deck_fsrs_configs()
 
     conn = connect_db()
-    cursor = conn.cursor()
-
-    current_time = datetime.now()
-    current_timestamp_ms = int(current_time.timestamp() * 1000)
-    collection_start = get_collection_start_date()
-
-    suspend_filter = "" if include_suspended else "AND c.queue != -1"
-    deck_filter = build_deck_filter(deck_id)
-
-    query = f"""
-        SELECT
-            c.id,
-            c.data,
-            c.type,
-            c.queue,
-            c.reps,
-            c.lapses,
-            c.ivl,
-            c.due,
-            CASE WHEN c.odid THEN c.odid ELSE c.did END
+    rows = conn.execute(f"""
+        SELECT c.data, c.queue, c.due, CASE WHEN c.odid THEN c.odid ELSE c.did END
         FROM cards c
         WHERE c.data IS NOT NULL
           AND c.data != ""
           AND c.type IN (1, 2)
-          {suspend_filter}
-          {deck_filter}
-    """
-
-    cursor.execute(query)
-    rows = cursor.fetchall()
+          {build_deck_filter(deck_id)}
+    """).fetchall()
     conn.close()
 
-    # Build lists for each column to avoid pandas conversion issues
-    ids = []
-    stabilities = []
-    difficulties = []
-    retrievabilities = []
-    days_since_reviews = []
-    reps_list = []
-    lapses_list = []
-    intervals = []
-    dues = []
-    days_overdues = []
-    is_suspendeds = []
-    card_types = []
-
-    for row in rows:
-        card_id, data_json, card_type, queue, reps, lapses, ivl, due, home_did = row
+    now = datetime.now()
+    collection_start = get_collection_start_date()
+    records = []
+    for data_json, queue, due, home_did in rows:
         fsrs = parse_fsrs_data(data_json)
+        if not (fsrs and 's' in fsrs and 'd' in fsrs):
+            continue
+        lrt = fsrs.get('lrt', 0)
+        days_since_review = (now.timestamp() - lrt) / 86400 if lrt > 0 else 0
+        decay = deck_configs.get(home_did, {}).get('decay', DEFAULT_DECAY)
+        records.append((
+            float(fsrs['s']),
+            float(fsrs['d']),
+            calculate_retrievability(fsrs['s'], days_since_review, decay) * 100,
+            (now - (collection_start + timedelta(days=due))).days,
+            queue == -1,
+        ))
 
-        if fsrs and 's' in fsrs and 'd' in fsrs:
-            stability = fsrs['s']
-            difficulty = fsrs['d']
-            last_review_time_sec = fsrs.get('lrt', 0)
-
-            if last_review_time_sec > 0:
-                days_since_review = (current_timestamp_ms / 1000 - last_review_time_sec) / 86400
-            else:
-                days_since_review = 0
-
-            decay = deck_configs.get(home_did, {}).get('decay', DEFAULT_DECAY)
-            retrievability = calculate_retrievability(stability, days_since_review, decay) * 100
-
-            # Calculate scheduled date and overdue status
-            scheduled_date = collection_start + timedelta(days=due)
-            days_overdue = (current_time - scheduled_date).days
-
-            ids.append(int(card_id))
-            stabilities.append(float(stability))
-            difficulties.append(float(difficulty))
-            retrievabilities.append(float(retrievability))
-            days_since_reviews.append(float(days_since_review))
-            reps_list.append(int(reps))
-            lapses_list.append(int(lapses))
-            intervals.append(int(ivl))
-            dues.append(int(due))
-            days_overdues.append(int(days_overdue))
-            is_suspendeds.append(queue == -1)
-            card_types.append('Learning' if card_type == 1 else 'Review')
-
-    if not ids:
-        return pd.DataFrame(columns=[
-            'id', 'stability', 'difficulty', 'retrievability', 'days_since_review',
-            'reps', 'lapses', 'interval', 'due', 'days_overdue', 'is_suspended', 'card_type'
-        ])
-
-    return pd.DataFrame({
-        'id': ids,
-        'stability': stabilities,
-        'difficulty': difficulties,
-        'retrievability': retrievabilities,
-        'days_since_review': days_since_reviews,
-        'reps': reps_list,
-        'lapses': lapses_list,
-        'interval': intervals,
-        'due': dues,
-        'days_overdue': days_overdues,
-        'is_suspended': is_suspendeds,
-        'card_type': card_types
-    })
+    return pd.DataFrame(records, columns=[
+        'stability', 'difficulty', 'retrievability', 'days_overdue', 'is_suspended'])
 
 
 # =============================================================================
@@ -352,98 +256,26 @@ def get_card_data(include_suspended: bool = True, deck_id: int | None = None) ->
 # =============================================================================
 
 def get_overview_stats(deck_id: int | None = None) -> dict:
-    """Get high-level overview statistics"""
-    conn = connect_db()
-    cursor = conn.cursor()
-
+    """Review cards, review count, hours studied and days since the first review."""
     deck_filter = build_deck_filter(deck_id)
-
-    # Card counts
-    cursor.execute(f"""
-        SELECT
-            COUNT(*) as total_cards,
-            SUM(CASE WHEN c.queue = -1 THEN 1 ELSE 0 END) as suspended,
-            SUM(CASE WHEN c.type = 0 THEN 1 ELSE 0 END) as new_cards,
-            SUM(CASE WHEN c.type = 1 THEN 1 ELSE 0 END) as learning,
-            SUM(CASE WHEN c.type = 2 THEN 1 ELSE 0 END) as review
-        FROM cards c
-        WHERE 1=1
-          {deck_filter}
-    """)
-    card_stats = cursor.fetchone()
-
-    # Review counts (join cards for deck filtering)
-    cursor.execute(f"""
-        SELECT
-            COUNT(*) as total_reviews,
-            SUM(r.time)/1000.0/3600.0 as total_hours,
-            AVG(r.time)/1000.0 as avg_time_per_review
+    conn = connect_db()
+    review_cards = conn.execute(
+        f"SELECT COUNT(*) FROM cards c WHERE c.type = 2 {deck_filter}").fetchone()[0]
+    total_reviews, total_ms, first_ts, last_ts = conn.execute(f"""
+        SELECT COUNT(*), SUM(r.time), MIN(r.id/1000), MAX(r.id/1000)
         FROM revlog r
         JOIN cards c ON r.cid = c.id
         WHERE r.type != 4
           {deck_filter}
-    """)
-    review_stats = cursor.fetchone()
-
-    # Date range
-    cursor.execute(f"""
-        SELECT
-            MIN(r.id/1000) as first_review,
-            MAX(r.id/1000) as last_review
-        FROM revlog r
-        JOIN cards c ON r.cid = c.id
-        WHERE r.type != 4
-          {deck_filter}
-    """)
-    date_stats = cursor.fetchone()
-
+    """).fetchone()
     conn.close()
 
-    first_review = datetime.fromtimestamp(date_stats[0]) if date_stats[0] else None
-    last_review = datetime.fromtimestamp(date_stats[1]) if date_stats[1] else None
-
     return {
-        'total_cards': card_stats[0] or 0,
-        'suspended_cards': card_stats[1] or 0,
-        'new_cards': card_stats[2] or 0,
-        'learning_cards': card_stats[3] or 0,
-        'review_cards': card_stats[4] or 0,
-        'total_reviews': review_stats[0] or 0,
-        'total_hours': round(review_stats[1] or 0, 1),
-        'avg_time_per_review': round(review_stats[2] or 0, 1),
-        'first_review': first_review,
-        'last_review': last_review,
-        'days_studied': (last_review - first_review).days if first_review and last_review else 0
-    }
-
-
-def get_memory_state_summary(deck_id: int | None = None) -> dict:
-    """Get summary of current memory states"""
-    cards_df = get_card_data(deck_id=deck_id)
-
-    if cards_df.empty:
-        return {
-            'total': 0,
-            'critical': 0,
-            'at_risk': 0,
-            'moderate': 0,
-            'good': 0,
-            'excellent': 0,
-            'mean_retrievability': 0.0,
-            'median_retrievability': 0.0
-        }
-
-    retrievabilities = cards_df['retrievability']
-
-    return {
-        'total': len(retrievabilities),
-        'critical': int(len(retrievabilities[retrievabilities < 50])),
-        'at_risk': int(len(retrievabilities[(retrievabilities >= 50) & (retrievabilities < 70)])),
-        'moderate': int(len(retrievabilities[(retrievabilities >= 70) & (retrievabilities < 85)])),
-        'good': int(len(retrievabilities[(retrievabilities >= 85) & (retrievabilities < 95)])),
-        'excellent': int(len(retrievabilities[retrievabilities >= 95])),
-        'mean_retrievability': round(float(retrievabilities.mean()), 1) if len(retrievabilities) > 0 else 0.0,
-        'median_retrievability': round(float(retrievabilities.median()), 1) if len(retrievabilities) > 0 else 0.0
+        'review_cards': review_cards,
+        'total_reviews': total_reviews,
+        'total_hours': round((total_ms or 0) / 3_600_000, 1),
+        'days_studied': (datetime.fromtimestamp(last_ts) - datetime.fromtimestamp(first_ts)).days
+                        if first_ts else 0,
     }
 
 
@@ -705,141 +537,45 @@ def get_rollover_hour(default: int = 4) -> int:
     return default
 
 
-def get_consistency_stats(review_days: int | None = None, deck_id: int | None = None) -> dict:
+def get_current_streak(deck_id: int | None = None) -> int:
     """
-    Calculate study consistency statistics: streaks, gaps, and regularity.
-
-    Study days follow Anki's rollover hour (default 4am), so a late-night
-    session before the rollover counts toward the previous calendar day —
-    matching how Anki assigns reviews to days.
-
-    Returns:
-        Dictionary with streak and consistency metrics
+    Consecutive study days ending today (or yesterday, if today has no
+    reviews yet). Days follow Anki's rollover hour, so a late-night session
+    before the rollover counts toward the previous calendar day.
     """
-    conn = connect_db()
-
-    # Get all study dates, shifted back by the rollover so the day boundary
-    # sits at Anki's rollover hour rather than midnight.
     rollover = get_rollover_hour()
-    review_filter = build_time_filter(review_days)
-    deck_filter = build_deck_filter(deck_id)
-    query = f"""
-        SELECT DISTINCT date(r.id/1000, 'unixepoch', 'localtime', '-{rollover} hours') as study_date
-        FROM revlog r
-        JOIN cards c ON r.cid = c.id
-        WHERE r.id > 0
-          AND r.type != 4
-          AND c.queue != -1
-          {review_filter}
-          {deck_filter}
-        ORDER BY study_date
-    """
-
-    df = pd.read_sql_query(query, conn)
+    conn = connect_db()
+    study_dates = {
+        datetime.strptime(d, '%Y-%m-%d').date() for (d,) in conn.execute(f"""
+            SELECT DISTINCT date(r.id/1000, 'unixepoch', 'localtime', '-{rollover} hours')
+            FROM revlog r
+            JOIN cards c ON r.cid = c.id
+            WHERE r.id > 0
+              AND r.type != 4
+              AND c.queue != -1
+              {build_deck_filter(deck_id)}
+        """)
+    }
     conn.close()
 
-    if df.empty:
-        return {
-            'current_streak': 0,
-            'longest_streak': 0,
-            'total_study_days': 0,
-            'avg_days_per_week': 0.0,
-            'best_hour': None
-        }
+    day = (datetime.now() - timedelta(hours=rollover)).date()
+    if day not in study_dates:
+        day -= timedelta(days=1)
+    streak = 0
+    while day in study_dates:
+        streak += 1
+        day -= timedelta(days=1)
+    return streak
 
-    df['study_date'] = pd.to_datetime(df['study_date']).dt.date
-    study_dates = set(df['study_date'])
-    # "Today" per the same rollover: before the rollover hour it's still yesterday.
-    today = (datetime.now() - timedelta(hours=rollover)).date()
 
-    # Calculate current streak (consecutive days ending today or yesterday)
-    current_streak = 0
-    check_date = today
-    while check_date in study_dates:
-        current_streak += 1
-        check_date -= timedelta(days=1)
-
-    # If no study today, check if streak was broken (yesterday not studied)
-    if today not in study_dates and (today - timedelta(days=1)) in study_dates:
-        current_streak = 0
-        check_date = today - timedelta(days=1)
-        while check_date in study_dates:
-            current_streak += 1
-            check_date -= timedelta(days=1)
-
-    # Calculate longest streak
-    sorted_dates = sorted(study_dates)
-    longest_streak = 0
-    streak = 1
-    for i in range(1, len(sorted_dates)):
-        if (sorted_dates[i] - sorted_dates[i-1]).days == 1:
-            streak += 1
-        else:
-            longest_streak = max(longest_streak, streak)
-            streak = 1
-    longest_streak = max(longest_streak, streak)
-
-    # Calculate avg days per week (last 4 weeks)
-    four_weeks_ago = today - timedelta(days=28)
-    recent_days = [d for d in study_dates if d >= four_weeks_ago]
-    avg_days_per_week = len(recent_days) / 4 if recent_days else 0
-
+def get_workload_summary(deck_id: int | None = None) -> dict:
+    """Cards due in the next 7 days and overdue (non-suspended) cards."""
+    forecast_df = get_future_load_forecast(7, deck_id=deck_id)
+    cards_df = get_card_data(deck_id=deck_id)
+    active = cards_df[~cards_df['is_suspended']]
     return {
-        'current_streak': current_streak,
-        'longest_streak': longest_streak,
-        'total_study_days': len(study_dates),
-        'avg_days_per_week': round(avg_days_per_week, 1)
-    }
-
-
-def get_workload_summary(
-    forecast_df: pd.DataFrame | None = None,
-    cards_df: pd.DataFrame | None = None,
-    deck_id: int | None = None
-) -> dict:
-    """
-    Get summary of upcoming workload for quick stats.
-
-    Returns:
-        Dictionary with workload metrics
-    """
-    if forecast_df is None:
-        forecast_df = get_future_load_forecast(30, deck_id=deck_id)
-    if cards_df is None:
-        cards_df = get_card_data(deck_id=deck_id)
-
-    if forecast_df.empty:
-        return {
-            'due_this_week': 0,
-            'overdue_cards': 0,
-            'peak_day': None,
-            'peak_day_count': 0,
-            'daily_load': 0.0
-        }
-
-    # Cards due in next 7 days
-    due_this_week = int(forecast_df.head(7)['due_count'].sum())
-
-    # Find peak day in next 30 days
-    peak_idx = forecast_df['due_count'].idxmax()
-    peak_day = forecast_df.loc[peak_idx, 'date']
-    peak_day_count = int(forecast_df.loc[peak_idx, 'due_count'])
-
-    # Overdue cards (days_overdue > 0, excluding suspended)
-    overdue_cards = 0
-    if not cards_df.empty and 'days_overdue' in cards_df.columns:
-        active = cards_df[~cards_df['is_suspended']]
-        overdue_cards = int((active['days_overdue'] > 0).sum())
-
-    # Current daily load
-    daily_load = calculate_daily_load(deck_id=deck_id)
-
-    return {
-        'due_this_week': due_this_week,
-        'overdue_cards': overdue_cards,
-        'peak_day': peak_day,
-        'peak_day_count': peak_day_count,
-        'daily_load': daily_load
+        'due_this_week': int(forecast_df['due_count'].sum()),
+        'overdue_cards': int((active['days_overdue'] > 0).sum()),
     }
 
 
@@ -848,71 +584,37 @@ def get_session_summary_stats(deck_id: int | None = None) -> dict:
     session_df = get_session_data(deck_id=deck_id)
     return {
         'avg_success_rate': 0 if session_df.empty else round(float(session_df['success_rate'].mean()), 1),
-        'current_streak': get_consistency_stats(deck_id=deck_id)['current_streak'],
+        'current_streak': get_current_streak(deck_id=deck_id),
     }
 
 
 def get_future_load_forecast(days_ahead: int = 60, deck_id: int | None = None) -> pd.DataFrame:
     """
-    Forecast future review load based on due dates.
+    Cards due on each of the next `days_ahead` days (learning + review).
 
-    Returns DataFrame with columns: date, due_count, expected_reviews
+    Returns DataFrame with columns: date, due_count, ma7 (7-day moving average)
     """
     conn = connect_db()
-    cursor = conn.cursor()
-
-    # Get collection creation date to calculate absolute due dates
-    cursor.execute('SELECT crt FROM col')
-    collection_timestamp = cursor.fetchone()[0]
-    collection_start = datetime.fromtimestamp(collection_timestamp)
-
-    deck_filter = build_deck_filter(deck_id)
-
-    # Get all cards with due dates
-    cursor.execute(f"""
-        SELECT
-            c.due,
-            c.queue,
-            c.type
+    df = pd.read_sql_query(f"""
+        SELECT c.due, c.queue
         FROM cards c
         WHERE c.queue IN (1, 2)  -- Learning or review
           AND c.due > 0
-          {deck_filter}
-    """)
-
-    rows = cursor.fetchall()
+          {build_deck_filter(deck_id)}
+    """, conn)
     conn.close()
 
-    # Calculate due dates
-    current_date = datetime.now().date()
-    forecast = {}
-
-    for due, queue, card_type in rows:
-        if queue == 2:  # Review cards: due is days since collection start
-            due_date = (collection_start + timedelta(days=due)).date()
-        else:  # Learning cards: due is timestamp
-            due_date = datetime.fromtimestamp(due).date()
-
-        days_until = (due_date - current_date).days
-
-        if 0 <= days_until < days_ahead:
-            forecast[days_until] = forecast.get(days_until, 0) + 1
-
-    # Create DataFrame with all days
-    dates = []
-    due_counts = []
-
-    for day in range(days_ahead):
-        future_date = current_date + timedelta(days=day)
-        dates.append(future_date)
-        due_counts.append(forecast.get(day, 0))
-
-    df = pd.DataFrame({
-        'date': dates,
-        'due_count': due_counts
+    # Review cards: due is days since collection start; learning: a timestamp
+    start = get_collection_start_date()
+    today = datetime.now().date()
+    days_until = pd.Series([
+        ((start + timedelta(days=due)) if queue == 2 else datetime.fromtimestamp(due)).date() - today
+        for due, queue in zip(df['due'], df['queue'])
+    ], dtype=object).map(lambda d: d.days)
+    counts = days_until.value_counts().reindex(range(days_ahead), fill_value=0)
+    out = pd.DataFrame({
+        'date': [today + timedelta(days=d) for d in range(days_ahead)],
+        'due_count': counts.to_numpy(),
     })
-
-    # Add 7-day moving average
-    df['ma7'] = df['due_count'].rolling(window=7, min_periods=1).mean()
-
-    return df
+    out['ma7'] = out['due_count'].rolling(window=7, min_periods=1).mean()
+    return out

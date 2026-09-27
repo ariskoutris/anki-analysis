@@ -102,7 +102,7 @@ def create_load_timeseries_chart(df, use_sessions=False, session_dates=None):
     fig.update_yaxes(rangemode='tozero', **DARK_CHART_AXIS)
 
     if use_sessions and session_dates is not None and len(session_dates):
-        fig = add_session_time_markers(fig, get_time_period_markers(d, 'date'))
+        add_session_time_markers(fig, get_time_period_markers(d, 'date'))
     return fig
 
 

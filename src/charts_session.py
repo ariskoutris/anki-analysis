@@ -11,35 +11,12 @@ from .constants import COLORS, DARK_CHART_LAYOUT, DARK_CHART_AXIS
 
 
 def get_time_period_markers(df, date_col='date'):
-    """
-    Generate markers for year boundaries when using session-based x-axis.
-    Returns a list of dicts with session index and label.
-    """
-    if df.empty:
-        return []
-
-    df_sorted = df.sort_values(date_col).reset_index(drop=True)
-    markers = []
-    last_year = None
-
-    for idx, row in df_sorted.iterrows():
-        date = pd.to_datetime(row[date_col])
-        current_year = date.year
-
-        if last_year is not None and current_year != last_year:
-            label = str(current_year)
-            markers.append({
-                'index': idx,
-                'label': label,
-                'date': date
-            })
-
-        last_year = current_year
-
-    return markers
+    """Row positions (after sorting by date) where the year changes, labelled with the new year."""
+    years = pd.to_datetime(df.sort_values(date_col)[date_col]).dt.year.reset_index(drop=True)
+    return [{'index': i, 'label': str(years[i])} for i in years.index[years.diff().fillna(0) != 0]]
 
 
-def add_session_time_markers(fig, markers, y_position='bottom'):
+def add_session_time_markers(fig, markers):
     """Add year-change divider lines with an offset label (matching the
     median reference lines on the distribution charts)."""
     for marker in markers:
@@ -50,8 +27,6 @@ def add_session_time_markers(fig, markers, y_position='bottom'):
             annotation_position='top right',
             annotation_font=dict(color='#8b8fa3', size=10),
         )
-
-    return fig
 
 
 def _add_trend_with_ci(fig, x_values, y_vals, color, custom_data, hover_label,
@@ -112,62 +87,54 @@ def _add_trend_with_ci(fig, x_values, y_vals, color, custom_data, hover_label,
     return y_range
 
 
-def create_daily_reviews_chart(df, use_sessions=False):
-    """Create daily reviews line chart"""
+def _session_scatter_chart(df, y_col, color, title, y_title, hover_value,
+                           use_sessions=False, y_max=None):
+    """
+    One dot per study day plus a rolling trend with 95% CI. The x-axis is
+    the date, or a sequential session number with year dividers.
+    """
     if df.empty:
         return go.Figure()
 
-    fig = go.Figure()
-
-    df_plot = df.sort_values('date').reset_index(drop=True)
-
+    d = df.sort_values('date').reset_index(drop=True)
     if use_sessions:
-        x_values = df_plot.index
-        x_range = [-0.5, len(df_plot) - 0.5]
-        hover_template = 'Session %{x}<br>%{customdata|%b %d, %Y}<br>Reviews: %{y}<extra></extra>'
-        custom_data = df_plot['date']
-        x_title = 'Session Number'
+        x_values, x_range = d.index, [-0.5, len(d) - 0.5]
+        custom_data, x_title = d['date'], 'Session Number'
+        hover = 'Session %{x}<br>%{customdata|%b %d, %Y}<br>' + hover_value + '<extra></extra>'
     else:
-        x_values = df_plot['date']
-        x_range = [df_plot['date'].min(), df_plot['date'].max()]
-        hover_template = '%{x|%b %d, %Y}<br>Reviews: %{y}<extra></extra>'
-        custom_data = None
-        x_title = 'Date'
+        x_values, x_range = d['date'], [d['date'].min(), d['date'].max()]
+        custom_data, x_title = None, 'Date'
+        hover = '%{x|%b %d, %Y}<br>' + hover_value + '<extra></extra>'
 
+    fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=x_values,
-        y=df_plot['daily_reviews'],
+        y=d[y_col],
         mode='markers',
         name='Session',
-        marker=dict(
-            size=6,
-            color=COLORS['primary'],
-            opacity=0.5,
-            line=dict(width=1, color='#111217')
-        ),
+        marker=dict(size=6, color=color, opacity=0.5, line=dict(width=1, color='#111217')),
         customdata=custom_data,
-        hovertemplate=hover_template
+        hovertemplate=hover
     ))
 
     y_range = _add_trend_with_ci(
-        fig, x_values, df_plot['daily_reviews'].values,
-        COLORS['primary'], custom_data, 'Trend', y_min=0
+        fig, x_values, d[y_col].values, color, custom_data, 'Trend', y_min=0, y_max=y_max
     )
 
-    fig.update_layout(
-        title='Daily Reviews',
-        xaxis_title=x_title,
-        yaxis_title='Reviews',
-        hovermode='x unified',
-        **DARK_CHART_LAYOUT,
-    )
+    fig.update_layout(title=title, xaxis_title=x_title, yaxis_title=y_title, **DARK_CHART_LAYOUT)
     fig.update_xaxes(range=x_range, **DARK_CHART_AXIS)
     fig.update_yaxes(range=y_range, **DARK_CHART_AXIS)
 
     if use_sessions:
-        markers = get_time_period_markers(df_plot, 'date')
-        fig = add_session_time_markers(fig, markers)
+        add_session_time_markers(fig, get_time_period_markers(d))
+    return fig
 
+
+def create_daily_reviews_chart(df, use_sessions=False):
+    """Reviews per day."""
+    fig = _session_scatter_chart(df, 'daily_reviews', COLORS['primary'], 'Daily Reviews',
+                                 'Reviews', 'Reviews: %{y}', use_sessions)
+    fig.update_layout(hovermode='x unified')
     return fig
 
 
@@ -215,124 +182,18 @@ def create_hourly_chart(df):
 
 
 def create_success_rate_chart(df, use_sessions=False):
-    """Create success rate over time chart"""
-    if df.empty:
-        return go.Figure()
-
-    df_sorted = df.sort_values('date').reset_index(drop=True)
-
-    if use_sessions:
-        x_values = df_sorted.index
-        x_range = [-0.5, len(df_sorted) - 0.5]
-        hover_main = 'Session %{x}<br>%{customdata|%b %d, %Y}<br>Success Rate: %{y:.1f}%<extra></extra>'
-        custom_data = df_sorted['date']
-        x_title = 'Session Number'
-    else:
-        x_values = df_sorted['date']
-        x_range = [df_sorted['date'].min(), df_sorted['date'].max()]
-        hover_main = '%{x|%b %d, %Y}<br>Success Rate: %{y:.1f}%<extra></extra>'
-        custom_data = None
-        x_title = 'Date'
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=x_values,
-        y=df_sorted['success_rate'],
-        mode='markers',
-        name='Session',
-        marker=dict(
-            size=6,
-            color=COLORS['success'],
-            opacity=0.5,
-            line=dict(width=1, color='#111217')
-        ),
-        customdata=custom_data,
-        hovertemplate=hover_main
-    ))
-
-    y_range = _add_trend_with_ci(
-        fig, x_values, df_sorted['success_rate'].values,
-        COLORS['success'], custom_data, 'Trend', y_min=0, y_max=100
-    )
-
-    fig.update_layout(
-        title='Recall Rate',
-        xaxis_title=x_title,
-        yaxis_title='Success Rate (%)',
-        yaxis_range=y_range,
-        **DARK_CHART_LAYOUT,
-    )
-    fig.update_xaxes(range=x_range, **DARK_CHART_AXIS)
-    fig.update_yaxes(**DARK_CHART_AXIS)
-
-    if use_sessions:
-        markers = get_time_period_markers(df_sorted, 'date')
-        fig = add_session_time_markers(fig, markers)
-
-    return fig
+    """Recall rate per study day."""
+    return _session_scatter_chart(df, 'success_rate', COLORS['success'], 'Recall Rate',
+                                  'Success Rate (%)', 'Success Rate: %{y:.1f}%',
+                                  use_sessions, y_max=100)
 
 
 def create_efficiency_chart(df, use_sessions=False):
-    """Create session efficiency chart"""
-    if df.empty:
-        return go.Figure()
-
-    df_sorted = df.sort_values('date').reset_index(drop=True)
-
-    # Seconds per card (inverse of the cards/min rate)
-    sec_per_card = 60.0 / df_sorted['cards_per_minute'].where(
-        df_sorted['cards_per_minute'] > 0)
-
-    if use_sessions:
-        x_values = df_sorted.index
-        x_range = [-0.5, len(df_sorted) - 0.5]
-        hover_template = 'Session %{x}<br>%{customdata|%b %d, %Y}<br>Speed: %{y:.1f} sec/card<extra></extra>'
-        custom_data = df_sorted['date']
-        x_title = 'Session Number'
-    else:
-        x_values = df_sorted['date']
-        x_range = [df_sorted['date'].min(), df_sorted['date'].max()]
-        hover_template = '%{x|%b %d, %Y}<br>Speed: %{y:.1f} sec/card<extra></extra>'
-        custom_data = None
-        x_title = 'Date'
-
-    fig = go.Figure()
-
-    fig.add_trace(go.Scatter(
-        x=x_values,
-        y=sec_per_card,
-        mode='markers',
-        name='Session',
-        marker=dict(
-            size=6,
-            color=COLORS['secondary'],
-            opacity=0.5,
-            line=dict(width=1, color='#111217')
-        ),
-        customdata=custom_data,
-        hovertemplate=hover_template
-    ))
-
-    y_range = _add_trend_with_ci(
-        fig, x_values, sec_per_card.values,
-        COLORS['secondary'], custom_data, 'Trend', y_min=0
-    )
-
-    fig.update_layout(
-        title='Review Speed',
-        xaxis_title=x_title,
-        yaxis_title='Sec/card',
-        **DARK_CHART_LAYOUT,
-    )
-    fig.update_xaxes(range=x_range, **DARK_CHART_AXIS)
-    fig.update_yaxes(range=y_range, **DARK_CHART_AXIS)
-
-    if use_sessions:
-        markers = get_time_period_markers(df_sorted, 'date')
-        fig = add_session_time_markers(fig, markers)
-
-    return fig
+    """Review speed (seconds per card, the inverse of cards/min) per study day."""
+    if not df.empty:
+        df = df.assign(sec_per_card=60.0 / df['cards_per_minute'].where(df['cards_per_minute'] > 0))
+    return _session_scatter_chart(df, 'sec_per_card', COLORS['secondary'], 'Review Speed',
+                                  'Sec/card', 'Speed: %{y:.1f} sec/card', use_sessions)
 
 
 def create_future_load_chart(df, days_ahead=60):

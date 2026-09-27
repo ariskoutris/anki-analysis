@@ -78,18 +78,17 @@ Pure data layer. Every public function opens its own `sqlite3` connection via `c
 - `get_daily_reviews()` – daily review counts
 
 **Card-level queries:**
-- `get_card_data()` – all review cards with FSRS params parsed from `cards.data` JSON (`s`, `d`, `lrt`). Computes retrievability in Python.
+- `get_card_data()` – learning/review cards: stability, difficulty, retrievability (from `cards.data` `s`/`d`/`lrt` + deck decay), days overdue, suspended flag
 
 **Summaries:**
-- `get_overview_stats()` – card/review counts, total hours, date range
-- `get_memory_state_summary()` – retrievability distribution (critical/at-risk/moderate/good/excellent)
+- `get_overview_stats()` – review cards, review count, total hours, days studied
 - `calculate_daily_load()` – Σ(1/stability) for review cards
 - `get_future_load_forecast(days_ahead)` – due card counts per day
 
 **Section summary functions:**
-- `get_consistency_stats()` – streak tracking, study regularity
+- `get_current_streak()` – consecutive study days (Anki rollover hour)
 - `get_session_summary_stats()` – current streak + avg recall rate (stat strip)
-- `get_workload_summary()` – due this week, overdue cards, peak day
+- `get_workload_summary()` – due this week, overdue cards
 **Key SQL conventions:**
 - `r.type != 4` excludes manual reschedules
 - `c.queue != -1` excludes suspended cards
@@ -149,8 +148,8 @@ Layout builders:
 
 ### charts_session.py
 
-Session chart builders (5 functions + 2 helpers):
-- Helpers: `get_time_period_markers()`, `add_session_time_markers()`
+Session chart builders (5 functions + helpers):
+- Helpers: `get_time_period_markers()`, `add_session_time_markers()`, `_session_scatter_chart()` (shared by daily reviews / recall rate / review speed)
 - Charts: `create_daily_reviews_chart`, `create_hourly_chart`, `create_success_rate_chart`, `create_efficiency_chart`, `create_future_load_chart`
 
 ### charts_card.py
