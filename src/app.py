@@ -4,6 +4,7 @@ AnkiDash: interactive Anki learning dashboard
 Entry point: creates the Dash app, sets layout, and registers callbacks.
 """
 
+import json
 import os
 import dash
 
@@ -46,6 +47,19 @@ app.layout = create_main_layout()
 # 4. Register all callbacks (side-effect import)
 # ---------------------------------------------------------------------------
 from . import callbacks  # noqa: F401, E402
+
+# Warm the data caches for the last-used view, so the first page load is instant
+try:
+    try:
+        with open(callbacks.LAST_VIEW_FILE) as f:
+            deck, time_range, xaxis_mode, load_basis = json.load(f)
+    except (OSError, ValueError):
+        deck, time_range, xaxis_mode, load_basis = 'all', 'all', 'dates', 'interval'
+    callbacks.update_overview_container(0, '/', deck, load_basis)
+    callbacks.update_session_charts(time_range, xaxis_mode, 0, deck)
+    callbacks.update_card_charts(0, deck, time_range, xaxis_mode, load_basis)
+except Exception as e:
+    print(f"  Cache warm-up skipped: {e}")
 
 # ---------------------------------------------------------------------------
 # 5. Entry point

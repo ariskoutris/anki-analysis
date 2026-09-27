@@ -4,6 +4,8 @@ All @callback decorators register against the global Dash app instance.
 """
 
 import base64
+import json
+import os
 import time
 from datetime import datetime
 import pandas as pd
@@ -63,6 +65,9 @@ from .fsrs_engine import (
     get_true_retention,
     get_deck_sim_defaults,
 )
+
+
+LAST_VIEW_FILE = os.path.join(DATA_DIR, 'last_view.json')
 
 
 def parse_time_range(time_range):
@@ -524,6 +529,9 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value):
 )
 def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode, load_basis):
     """Update card charts based on filters, date range and x-axis mode."""
+    # Remember the view, so the next startup warms the cache for it (app.py)
+    with open(LAST_VIEW_FILE, 'w') as f:
+        json.dump([deck_value, time_range, xaxis_mode, load_basis], f)
     deck_id = parse_deck(deck_value)
     use_sessions = (xaxis_mode == 'sessions')
     use_stability = (load_basis == 'stability')

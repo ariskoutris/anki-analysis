@@ -72,7 +72,7 @@ Simple path helpers. Key exports:
 
 ### data_loader.py
 
-Data layer. Plain SQL goes through `connect_db()` (sqlite3); anything Anki computes (FSRS retrievability, future-due counts, rollover, deck names) goes through `open_collection()`, which opens data/anki.db as an Anki `Collection` under a lock (the backend raises DBError on concurrent opens; Dash runs callbacks in parallel). `deck_search(deck_id)` is the Anki-search twin of `build_deck_filter`. No caching across requests.
+Data layer. Plain SQL goes through `connect_db()` (sqlite3); anything Anki computes (FSRS retrievability, future-due counts, rollover, deck names) goes through `open_collection()`, which opens data/anki.db as an Anki `Collection` under a lock (the backend raises DBError on concurrent opens; Dash runs callbacks in parallel). `deck_search(deck_id)` is the Anki-search twin of `build_deck_filter`. Every function a callback calls is wrapped in `@per_db`: an `lru_cache` keyed on (anki.db inode, current hour). Sync and upload `os.replace` the file, so the inode changes; mtime can't be used because Anki writes to the file itself on first use after a download. Cached DataFrames are shared, so never mutate them in place.
 
 **Session-level queries** (all accept `review_days`):
 - `get_session_data()` – per-day session stats (cards, success rate, timing)
@@ -111,7 +111,7 @@ plain sqlite3 reads keep working alongside it.
 - `replay_reviews(deck_id)` – one row per genuine review (types 0-3, ease 1-4,
   card still in collection) with predicted retrievability + stability after,
   from `col.card_stats_data(cid).revlog[*].memory_state`
-  (exact match to `cards.data`). Cached per (db mtime, deck_id).
+  (exact match to `cards.data`). Cached via `per_db`.
 - `get_known_words_timeseries` – Σ retrievability over all seen cards per day
   (hero chart, full-width row)
 - `get_calibration_data` / `get_calibration_summary` – predicted vs observed
@@ -183,9 +183,10 @@ Slim orchestrator:
 2. `app = dash.Dash(...)` + `app.index_string = INDEX_STRING`
 3. `app.layout = create_main_layout()` (no arguments)
 4. Side-effect import of `callbacks` (registers all `@callback` decorators)
-5. `if __name__ == '__main__'` entry point
+5. Cache warm-up: calls the overview/session/card callbacks for the last-used view (data/last_view.json, written by `update_card_charts`), so the first page load hits the cache
+6. `if __name__ == '__main__'` entry point
 
-**Critical ordering:** auto-sync → app creation → layout → callback import (callbacks reference component IDs created in layout).
+**Critical ordering:** auto-sync → app creation → layout → callback import → warm-up (callbacks reference component IDs created in layout).
 
 **Tab 1 – Study Sessions** (3 sections):
 

@@ -4,19 +4,17 @@ FSRS analytics on top of Anki's own backend (the `anki` package).
 Per-review memory states, deck presets, the forward simulator and the
 retention/workload estimate all come from Anki itself, so they match what
 Anki schedules with. This module derives the dashboard's analytics from them:
-known-words series, calibration, fatigue. Replay results are cached per
-(db mtime, deck_id).
+known-words series, calibration, fatigue. Results are cached per database
+version (see data_loader.per_db).
 """
 
-import os
 from datetime import datetime
 
 import numpy as np
 import pandas as pd
 from anki.scheduler_pb2 import SimulateFsrsReviewRequest
 
-from .config import get_db_path
-from .data_loader import connect_db, build_deck_filter, deck_search, open_collection
+from .data_loader import connect_db, build_deck_filter, deck_search, open_collection, per_db
 
 
 # =============================================================================
@@ -69,16 +67,8 @@ def _main_config(col, deck_id: int | None) -> dict:
 # REVIEW LOG REPLAY
 # =============================================================================
 
-_replay_cache: dict = {}
 
-
-def _db_token():
-    try:
-        return os.path.getmtime(get_db_path())
-    except OSError:
-        return None
-
-
+@per_db
 def replay_reviews(deck_id: int | None = None) -> pd.DataFrame:
     """
     Per-review FSRS memory states as computed by Anki (card info's history).
@@ -89,10 +79,6 @@ def replay_reviews(deck_id: int | None = None) -> pd.DataFrame:
         predicted_r  (retrievability just before this review; NaN on first),
         s_after, decay, factor (forgetting-curve constants of the card's preset)
     """
-    cache_key = (_db_token(), deck_id)
-    if _replay_cache.get('key') == cache_key:
-        return _replay_cache['df']
-
     conn = connect_db()
     cards = conn.execute(f"""
         SELECT c.id, CASE WHEN c.odid THEN c.odid ELSE c.did END
@@ -135,16 +121,14 @@ def replay_reviews(deck_id: int | None = None) -> pd.DataFrame:
                 cols['factor'].append(factor)
                 prev_ts, s_before = e.time, s_after
 
-    df = pd.DataFrame(cols)
-    _replay_cache['key'] = cache_key
-    _replay_cache['df'] = df
-    return df
+    return pd.DataFrame(cols)
 
 
 # =============================================================================
 # KNOWN WORDS (expected vocabulary) TIME SERIES
 # =============================================================================
 
+@per_db
 def get_known_words_timeseries(deck_id: int | None = None) -> pd.DataFrame:
     """
     Expected number of currently-recallable cards over time:
@@ -201,6 +185,7 @@ def get_known_words_timeseries(deck_id: int | None = None) -> pd.DataFrame:
     return result
 
 
+@per_db
 def get_true_retention(deck_id: int | None = None) -> dict:
     """
     Anki's true retention (Stats screen): % of reviews of review cards that
@@ -221,6 +206,7 @@ def get_true_retention(deck_id: int | None = None) -> dict:
 # PLANNING: RETENTION <-> WORKLOAD, FORWARD SIMULATION
 # =============================================================================
 
+@per_db
 def get_retention_workload_curve(deck_id: int | None = None) -> dict:
     """
     Anki's retention -> workload estimate (deck options' FSRS "help me
@@ -311,6 +297,7 @@ def simulate_future(
 # SESSION FATIGUE
 # =============================================================================
 
+@per_db
 def get_fatigue_curve(
     deck_id: int | None = None,
     gap_minutes: int = 30,
@@ -388,6 +375,7 @@ def _wilson_interval(successes: np.ndarray, n: np.ndarray, z: float = 1.96):
     return center - half, center + half
 
 
+@per_db
 def get_calibration_data(deck_id: int | None = None, n_bins: int = 15) -> pd.DataFrame:
     """
     Bin reviews by FSRS-predicted retrievability and compare against
@@ -426,6 +414,7 @@ def get_calibration_data(deck_id: int | None = None, n_bins: int = 15) -> pd.Dat
     return grouped[['predicted', 'observed', 'n', 'ci_low', 'ci_high']]
 
 
+@per_db
 def get_calibration_summary(deck_id: int | None = None) -> dict:
     """Overall calibration verdict: mean predicted vs observed recall."""
     df = replay_reviews(deck_id)

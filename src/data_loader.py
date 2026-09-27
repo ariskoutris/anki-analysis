@@ -9,6 +9,7 @@ import sqlite3
 import threading
 import time
 from contextlib import contextmanager
+from functools import lru_cache, wraps
 from datetime import datetime, timedelta
 
 import numpy as np
@@ -21,6 +22,24 @@ from src.config import get_db_path
 def connect_db():
     """Connect to the Anki database"""
     return sqlite3.connect(get_db_path())
+
+
+def per_db(f):
+    """
+    Cache f's result per database file and hour. Sync and upload swap in a
+    new file (new inode); mtime won't do, since Anki itself writes to the file
+    on first use after a download.
+    """
+    inner = lru_cache(maxsize=16)(lambda _token, *a, **k: f(*a, **k))
+
+    @wraps(f)
+    def cached(*a, **k):
+        try:
+            inode = os.stat(get_db_path()).st_ino
+        except OSError:
+            inode = None
+        return inner((inode, int(time.time() // 3600)), *a, **k)
+    return cached
 
 
 # Anki's backend fails with DBError when two threads open the collection at
@@ -84,6 +103,7 @@ def build_time_filter(review_days: int | None = None) -> str:
     return f"AND r.id/1000 >= {cutoff_timestamp}"
 
 
+@per_db
 def get_session_data(review_days: int | None = None, deck_id: int | None = None) -> pd.DataFrame:
     """
     Extract comprehensive session-based statistics.
@@ -131,6 +151,7 @@ def get_session_data(review_days: int | None = None, deck_id: int | None = None)
     return df
 
 
+@per_db
 def get_hourly_stats(review_days: int | None = None, deck_id: int | None = None) -> pd.DataFrame:
     """Get aggregated statistics by hour of day"""
     conn = connect_db()
@@ -161,6 +182,7 @@ def get_hourly_stats(review_days: int | None = None, deck_id: int | None = None)
     return df
 
 
+@per_db
 def get_daily_reviews(review_days: int | None = None, deck_id: int | None = None) -> pd.DataFrame:
     """Get daily review statistics"""
     conn = connect_db()
@@ -198,6 +220,7 @@ def get_daily_reviews(review_days: int | None = None, deck_id: int | None = None
 # CARD DATA
 # =============================================================================
 
+@per_db
 def get_card_data(deck_id: int | None = None) -> pd.DataFrame:
     """
     Learning/review cards (suspended included, matching Anki) with FSRS
@@ -223,6 +246,7 @@ def get_card_data(deck_id: int | None = None) -> pd.DataFrame:
 # SUMMARY STATISTICS
 # =============================================================================
 
+@per_db
 def get_overview_stats(deck_id: int | None = None) -> dict:
     """Review cards, review count, hours studied and days since the first review."""
     deck_filter = build_deck_filter(deck_id)
@@ -318,6 +342,7 @@ def get_card_load(deck_id: int | None = None, use_stability: bool = False,
     return out
 
 
+@per_db
 def calculate_daily_load(deck_id: int | None = None,
                          use_stability: bool = False) -> float:
     """
@@ -328,6 +353,7 @@ def calculate_daily_load(deck_id: int | None = None,
     return round(float(df['contrib'].sum()) if not df.empty else 0.0, 2)
 
 
+@per_db
 def get_load_timeseries(deck_id: int | None = None,
                         use_stability: bool = False) -> pd.DataFrame:
     """
@@ -438,6 +464,7 @@ def _load_timeseries_stability(deck_id: int | None = None) -> pd.DataFrame:
     return pd.DataFrame({'date': load.index, 'load': load.to_numpy()})
 
 
+@per_db
 def get_load_by_introduction(deck_id: int | None = None,
                              use_stability: bool = False) -> pd.DataFrame:
     """
@@ -451,6 +478,7 @@ def get_load_by_introduction(deck_id: int | None = None,
     return df[['intro_date', 'contrib']]
 
 
+@per_db
 def get_session_dates(deck_id: int | None = None) -> pd.Series:
     """
     Sorted unique study-session days — days with at least one genuine review
@@ -474,6 +502,7 @@ def get_session_dates(deck_id: int | None = None) -> pd.Series:
             .drop_duplicates().sort_values().reset_index(drop=True))
 
 
+@per_db
 def get_lapse_load(deck_id: int | None = None,
                    use_stability: bool = False) -> pd.DataFrame:
     """
@@ -532,6 +561,7 @@ def _future_due(deck_id: int | None) -> dict[int, int]:
         return dict(col._backend.graphs(search=deck_search(deck_id), days=1).future_due.future_due)
 
 
+@per_db
 def get_workload_summary(deck_id: int | None = None) -> dict:
     """Cards due in the next 7 days (today included) and overdue cards."""
     due = _future_due(deck_id)
@@ -541,6 +571,7 @@ def get_workload_summary(deck_id: int | None = None) -> dict:
     }
 
 
+@per_db
 def get_session_summary_stats(deck_id: int | None = None) -> dict:
     """Streak and average recall rate for the stat strip."""
     session_df = get_session_data(deck_id=deck_id)
@@ -550,6 +581,7 @@ def get_session_summary_stats(deck_id: int | None = None) -> dict:
     }
 
 
+@per_db
 def get_future_load_forecast(days_ahead: int = 60, deck_id: int | None = None) -> pd.DataFrame:
     """
     Cards due on each of the next `days_ahead` days (day 0 = Anki's today,
