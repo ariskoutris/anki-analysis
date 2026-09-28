@@ -211,7 +211,7 @@ INDEX_STRING = '''
             }
             .grid-panel { position: relative; min-width: 0; }
             .grid-panel__grip {
-                position: absolute; top: 3px; left: 50%; transform: translateX(-50%);
+                position: absolute; top: 3px; right: 18px;
                 z-index: 2; padding: 0 10px; border-radius: 3px;
                 font-size: 12px; color: #5a5e72; cursor: grab;
                 user-select: none; touch-action: none;
@@ -233,6 +233,15 @@ INDEX_STRING = '''
             .grid-panel.is-resizing .grid-panel__resize::after { opacity: 1; }
             .grid-panel.is-moving { outline: 1px dashed #5b8dff; }
             body.grid-busy { user-select: none; }
+            .dash-graph .gtitle, .dash-graph .xtitle, .dash-graph .ytitle {
+                pointer-events: all; cursor: help;
+            }
+            .chart-hint {
+                position: fixed; z-index: 1000; max-width: 280px;
+                padding: 6px 9px; border: 1px solid #3a3e50; border-radius: 4px;
+                background: #181b23; color: #e0e0e0; font: 12px/1.4 sans-serif;
+                pointer-events: none;
+            }
             body.grid-busy .js-plotly-plot { pointer-events: none; }
             @media (max-width: 900px) {
                 .chart-grid { grid-template-columns: minmax(0, 1fr); }
@@ -387,10 +396,7 @@ INDEX_STRING = '''
             {%renderer%}
         </footer>
         <script>
-        /* Explanatory hover hints injected onto each chart's title + axis
-           titles as native SVG <title> tooltips. Re-applied on every Plotly
-           re-render via a MutationObserver (charts rebuild on filter changes,
-           drags and resizes). */
+        /* Explanatory hints for chart and axis titles. */
         (function () {
             var HINTS = {
                 'chart-daily-reviews': {
@@ -478,37 +484,26 @@ INDEX_STRING = '''
                 }
             };
 
-            function apply(el, tip) {
-                if (!el || !tip) return;
-                el.style.pointerEvents = 'all';
-                el.style.cursor = 'help';
-                var existing = el.querySelector('title');
-                if (existing) {
-                    if (existing.textContent !== tip) existing.textContent = tip;
-                    return;
-                }
-                var t = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-                t.textContent = tip;
-                el.insertBefore(t, el.firstChild);
-            }
-
-            function decorate() {
-                Object.keys(HINTS).forEach(function (id) {
-                    var root = document.getElementById(id);
-                    if (!root) return;
-                    var h = HINTS[id];
-                    apply(root.querySelector('.gtitle'), h.title);
-                    apply(root.querySelector('.xtitle'), h.x);
-                    apply(root.querySelector('.ytitle'), h.y);
-                });
-            }
-
-            var pending = false;
-            function schedule() {
-                if (pending) return;
-                pending = true;
-                requestAnimationFrame(function () { pending = false; decorate(); });
-            }
+            var hint = document.createElement('div');
+            hint.className = 'chart-hint';
+            hint.hidden = true;
+            document.body.appendChild(hint);
+            document.addEventListener('pointermove', function (e) {
+                var label = e.target.closest('.gtitle, .xtitle, .ytitle');
+                var graph = label && label.closest('.dash-graph');
+                var tips = graph && HINTS[graph.id];
+                var key = label && (label.classList.contains('gtitle') ? 'title'
+                    : label.classList.contains('xtitle') ? 'x' : 'y');
+                var message = tips && tips[key];
+                hint.hidden = !message;
+                if (!message) return;
+                hint.textContent = message;
+                hint.style.left = Math.max(8, Math.min(e.clientX + 12,
+                    window.innerWidth - hint.offsetWidth - 8)) + 'px';
+                hint.style.top = Math.max(8, Math.min(e.clientY + 12,
+                    window.innerHeight - hint.offsetHeight - 8)) + 'px';
+            });
+            document.addEventListener('pointerleave', function () { hint.hidden = true; });
 
             /* Resize each chart whenever its container changes size (grid
                drags/resizes, their CSS transitions, window resizes, late data),
@@ -529,13 +524,9 @@ INDEX_STRING = '''
             }
 
             function start() {
-                decorate();
                 watchSizes();
                 new MutationObserver(watchSizes).observe(
                     document.body, { childList: true, subtree: true });
-                new MutationObserver(schedule).observe(
-                    document.body, { childList: true, subtree: true });
-                setInterval(decorate, 2000);  // cheap idempotent fallback
             }
 
             if (document.readyState === 'loading') {
