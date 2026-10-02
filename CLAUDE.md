@@ -161,7 +161,7 @@ Card chart builders (4 pure functions – DataFrame in, Figure out):
 
 ### callbacks.py
 
-All `@callback` functions + `parse_time_range` utility:
+All `@callback` functions + `parse_time_range` utility. The chart callbacks' figures are cached with `per_db` too (`update_card_charts` writes data/last_view.json, then calls the cached `_card_charts`):
 
 | Callback | Trigger | Output |
 |----------|---------|--------|

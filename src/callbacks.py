@@ -41,6 +41,7 @@ from .charts_card import (
     create_difficulty_distribution_chart,
 )
 from .data_loader import (
+    per_db,
     get_session_data,
     get_hourly_stats,
     get_daily_reviews,
@@ -383,6 +384,7 @@ def run_forecast_simulation(_n, days, retention, new_per_day, max_reviews, deck_
      Input('deck-filter', 'value')],
     prevent_initial_call=False
 )
+@per_db
 def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value):
     """Update session charts based on time range and x-axis mode."""
     use_sessions = (xaxis_mode == 'sessions')
@@ -435,6 +437,12 @@ def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode):
     # Remember the view, so the next startup warms the cache for it (app.py)
     with open(LAST_VIEW_FILE, 'w') as f:
         json.dump([deck_value, time_range, xaxis_mode], f)
+    return _card_charts(deck_value, time_range, xaxis_mode)
+
+
+@per_db
+def _card_charts(deck_value, time_range, xaxis_mode):
+    """The card chart figures (cached; kept apart from the last-view write)."""
     deck_id = parse_deck(deck_value)
     use_sessions = (xaxis_mode == 'sessions')
     review_days = parse_time_range(time_range)
