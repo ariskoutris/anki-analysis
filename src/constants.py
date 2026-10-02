@@ -504,36 +504,6 @@ INDEX_STRING = '''
                     window.innerHeight - hint.offsetHeight - 8)) + 'px';
             });
             document.addEventListener('pointerleave', function () { hint.hidden = true; });
-
-            /* Resize each chart whenever its container changes size (grid
-               drags/resizes, their CSS transitions, window resizes, late data),
-               instead of guessing with timed synthetic window resizes. */
-            var observed = new WeakSet();
-            var sizer = new ResizeObserver(function (entries) {
-                entries.forEach(function (e) {
-                    var plot = e.target.querySelector('.js-plotly-plot');
-                    if (plot && e.contentRect.width > 0 && window.Plotly) {
-                        window.Plotly.Plots.resize(plot);
-                    }
-                });
-            });
-            function watchSizes() {
-                document.querySelectorAll('.dash-graph').forEach(function (g) {
-                    if (!observed.has(g)) { observed.add(g); sizer.observe(g); }
-                });
-            }
-
-            function start() {
-                watchSizes();
-                new MutationObserver(watchSizes).observe(
-                    document.body, { childList: true, subtree: true });
-            }
-
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', start);
-            } else {
-                start();
-            }
         })();
         </script>
     </body>
