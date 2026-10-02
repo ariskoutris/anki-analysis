@@ -19,7 +19,7 @@ src/
   charts_session.py         – 5 session chart functions + session-mode helpers
   charts_card.py            – 9 card/analytics chart functions (pure: DataFrame → Figure)
   upload_handler.py         – .apkg file upload processing
-  anki_sync.py              – AnkiWeb login + full download → data/anki.db via the `anki` package; sync key in data/ankiweb.json, last successful sync in data/last_sync.json (`get_last_sync_time()`)
+  anki_sync.py              – AnkiWeb login + full download → data/anki.db via the `anki` package (skipped when `sync_status` on the current anki.db reports no changes); sync key in data/ankiweb.json, last successful sync in data/last_sync.json (`get_last_sync_time()`)
   data_loader.py            – All SQL queries, FSRS calculations, DataFrame construction, summary stats
   fsrs_engine.py            – FSRS analytics on Anki's backend (`anki` package) (see below)
 pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly, pywebview, anki); managed with uv

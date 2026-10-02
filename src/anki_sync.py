@@ -17,8 +17,9 @@ from typing import Tuple, Optional
 
 from anki.collection import Collection
 from anki.errors import SyncError, SyncErrorKind
-from anki.sync_pb2 import SyncAuth
+from anki.sync_pb2 import SyncAuth, SyncStatusResponse
 
+from .data_loader import open_collection
 from .upload_handler import validate_database
 
 LAST_SYNC_FILE = "last_sync.json"
@@ -60,10 +61,38 @@ def get_last_sync_time(data_root: str) -> Optional[float]:
         return None
 
 
+def _download(auth: SyncAuth, data_root: str) -> None:
+    """Full download from AnkiWeb, validated, then swapped in as data/anki.db."""
+    with tempfile.TemporaryDirectory(dir=data_root) as tmp:
+        staging_db = os.path.join(tmp, "collection.anki2")
+        col = Collection(staging_db)
+        try:
+            # Each account lives on its own sync server; the status call reports which
+            status = col.sync_status(auth)
+            if status.HasField("new_endpoint"):
+                auth.endpoint = status.new_endpoint
+            col.close_for_full_sync()
+            col.full_upload_or_download(auth=auth, server_usn=None, upload=False)
+        finally:
+            col.close()
+
+        # Anki leaves the file in WAL mode; a stale anki.db-wal next to the
+        # swapped-in file could otherwise be replayed onto it
+        with sqlite3.connect(staging_db) as conn:
+            conn.execute("PRAGMA journal_mode=DELETE")
+        conn.close()
+
+        valid, validate_msg = validate_database(staging_db)
+        if not valid:
+            raise ValueError(f"Downloaded collection is invalid: {validate_msg}")
+        os.replace(staging_db, Path(data_root) / "anki.db")
+
+
 def sync_from_ankiweb(data_root: str) -> Tuple[bool, str]:
     """
-    Download the collection from AnkiWeb into data/anki.db and record the time
-    of every successful sync in data/last_sync.json.
+    Download the collection from AnkiWeb into data/anki.db (skipped when
+    AnkiWeb has nothing new) and record the time of every successful sync in
+    data/last_sync.json.
 
     Returns:
         (success: bool, message: str)
@@ -73,29 +102,13 @@ def sync_from_ankiweb(data_root: str) -> Tuple[bool, str]:
 
     auth = SyncAuth(hkey=json.loads((Path(data_root) / AUTH_FILE).read_text())["hkey"])
     try:
-        with tempfile.TemporaryDirectory(dir=data_root) as tmp:
-            staging_db = os.path.join(tmp, "collection.anki2")
-            col = Collection(staging_db)
-            try:
-                # Each account lives on its own sync server; the status call reports which
-                status = col.sync_status(auth)
-                if status.HasField("new_endpoint"):
-                    auth.endpoint = status.new_endpoint
-                col.close_for_full_sync()
-                col.full_upload_or_download(auth=auth, server_usn=None, upload=False)
-            finally:
-                col.close()
-
-            # Anki leaves the file in WAL mode; a stale anki.db-wal next to the
-            # swapped-in file could otherwise be replayed onto it
-            with sqlite3.connect(staging_db) as conn:
-                conn.execute("PRAGMA journal_mode=DELETE")
-            conn.close()
-
-            valid, validate_msg = validate_database(staging_db)
-            if not valid:
-                return False, f"Downloaded collection is invalid: {validate_msg}"
-            os.replace(staging_db, Path(data_root) / "anki.db")
+        try:
+            with open_collection() as col:
+                unchanged = col.sync_status(auth).required == SyncStatusResponse.NO_CHANGES
+        except FileNotFoundError:
+            unchanged = False
+        if not unchanged:
+            _download(auth, data_root)
     except SyncError as e:
         if e.kind == SyncErrorKind.AUTH:
             logout(data_root)
