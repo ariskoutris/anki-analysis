@@ -100,6 +100,19 @@ _EMPTY_FIG = go.Figure(layout=dict(
 ))
 
 
+def _dates_as_ms(*figs):
+    """
+    Send date x-values as epoch ms on a date axis: same chart, but the browser
+    skips parsing thousands of date strings.
+    """
+    for fig in figs:
+        for trace in fig.data:
+            if getattr(trace.x, 'dtype', None) is not None and trace.x.dtype.kind == 'M':
+                trace.x = trace.x.astype('datetime64[ms]').astype('float64')
+                fig.layout[(trace.xaxis or 'x').replace('x', 'xaxis', 1)].type = 'date'
+    return figs
+
+
 # ---------------------------------------------------------------------------
 # Callback: Overview stats (stat strip)
 # ---------------------------------------------------------------------------
@@ -406,7 +419,7 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value):
     fig_speed = create_efficiency_chart(session_df, use_sessions=use_sessions)
     fig_forecast = create_future_load_chart(forecast_df, days_ahead=forecast_days)
 
-    return fig_daily, fig_hourly, fig_recall, fig_speed, fig_forecast
+    return _dates_as_ms(fig_daily, fig_hourly, fig_recall, fig_speed, fig_forecast)
 
 
 # ---------------------------------------------------------------------------
@@ -489,6 +502,6 @@ def _card_charts(deck_value, time_range, xaxis_mode):
     fig_lapse_load = create_lapse_load_chart(
         get_lapse_load(deck_id=deck_id))
 
-    return (fig_known, fig_calib, fig_ret, fig_stab, fig_diff,
-            fig_retention, fig_load_intro, fig_fatigue, fig_load_trend,
-            fig_lapse_load)
+    return _dates_as_ms(fig_known, fig_calib, fig_ret, fig_stab, fig_diff,
+                        fig_retention, fig_load_intro, fig_fatigue, fig_load_trend,
+                        fig_lapse_load)

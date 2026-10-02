@@ -210,6 +210,7 @@ Charts support a date/session x-axis toggle. In session mode, sequential indices
 - FSRS params live in `cards.data` as JSON: `{"s": stability, "d": difficulty, "lrt": last_review_timestamp_sec, ...}`
 - Retrievability: Anki's own `extract_fsrs_retrievability` (card snapshot) / FSRS-6 curve with each deck's decay (replay)
 - All SQL filters are built via `build_time_filter()` which returns a SQL fragment
+- Date x-values reach the browser as epoch ms on `type='date'` axes (`_dates_as_ms` in callbacks.py, applied to every chart callback's figures), so Plotly skips parsing date strings
 - Charts use a shared `COLORS` dict and `DARK_CHART_LAYOUT` for consistent styling (defined in `constants.py`)
 - All modules use relative imports (`from .constants import COLORS`); run via `uv run python -m src.app`
 
