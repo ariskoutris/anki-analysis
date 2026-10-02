@@ -147,7 +147,7 @@ Layout builders:
 - `create_section_container(title, description, content_id, summary_id)` – section wrapper with header and optional summary area
 - `create_session_tab()` – session tab layout with 3 sections (volume, effectiveness, workload)
 - `create_cards_tab()` – card tab layout with 3 sections (knowledge, maturity, problems)
-- `_segmented(id, options)` – top-bar toggle (Range, X-axis, Load): `dcc.RadioItems` styled by the `.segmented` CSS class, value remembered via Dash `persistence` (deck dropdown too); no callbacks needed
+- `_segmented(id, options)` – top-bar toggle (Range, X-axis): `dcc.RadioItems` styled by the `.segmented` CSS class, value remembered via Dash `persistence` (deck dropdown too); no callbacks needed
 - `_grid_panel(id, width)` – grid chart panel; charts the Range filter doesn't apply to (`_RANGE_EXEMPT`) get a corner tag ("Now", "All time", "Next 365d")
 - `create_main_layout()` – assembles the full page layout (top bar includes the `last-sync-indicator` span next to Sync/Upload, plus the hidden `ankiweb-login` panel; `data-poll` interval + `data-version` store; `grid-reset` button under the grid)
 
@@ -217,6 +217,7 @@ Charts support a date/session x-axis toggle. In session mode, sequential indices
 - Retrievability: Anki's own `extract_fsrs_retrievability` (card snapshot) / FSRS-6 curve with each deck's decay (replay)
 - All SQL filters are built via `build_time_filter()` which returns a SQL fragment
 - Date x-values reach the browser as epoch ms on `type='date'` axes (`_dates_as_ms` in callbacks.py, applied to every chart callback's figures), so Plotly skips parsing date strings
+- Tooltips: plain `title=` attributes; the hint script in `INDEX_STRING` shows them (pywebview doesn't show native ones), as well as the chart/axis-title hints in its `HINTS`
 - Charts use a shared `COLORS` dict and `DARK_CHART_LAYOUT` for consistent styling (defined in `constants.py`)
 - All modules use relative imports (`from .constants import COLORS`); run via `uv run python -m src.app`
 

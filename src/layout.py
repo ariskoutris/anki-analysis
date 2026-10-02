@@ -56,8 +56,8 @@ def _grid_panel(chart_id, width):
     tag = _RANGE_EXEMPT.get(chart_id)
     return html.Div([
         html.Div([
-            tag and html.Span(tag, className='grid-panel__tag', **{
-                'data-hint': 'The Range filter doesn’t apply to this chart'}),
+            tag and html.Span(tag, className='grid-panel__tag',
+                              title='The Range filter doesn’t apply to this chart'),
             html.Span('⠿', className='grid-panel__grip', title='Drag to move'),
         ], className='grid-panel__corner'),
         dcc.Graph(id=chart_id, config={'displayModeBar': False}, responsive=True,

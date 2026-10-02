@@ -221,7 +221,6 @@ INDEX_STRING = '''
             .grid-panel__tag {
                 padding: 1px 6px; border: 1px solid #2a2d3a; border-radius: 3px;
                 font-size: 10px; color: #8b8fa3; cursor: help; user-select: none;
-                pointer-events: all;
             }
             .grid-panel__grip {
                 padding: 0 10px; border-radius: 3px;
@@ -259,7 +258,7 @@ INDEX_STRING = '''
                 position: fixed; z-index: 1000; max-width: 280px;
                 padding: 6px 9px; border: 1px solid #3a3e50; border-radius: 4px;
                 background: #181b23; color: #e0e0e0; font: 12px/1.4 sans-serif;
-                pointer-events: none;
+                white-space: pre-line; pointer-events: none;
             }
             body.grid-busy .js-plotly-plot { pointer-events: none; }
             @media (max-width: 900px) {
@@ -416,8 +415,8 @@ INDEX_STRING = '''
             {%renderer%}
         </footer>
         <script>
-        /* Explanatory hints for chart and axis titles, and any element with a
-           data-hint attribute (native title tooltips don't show in pywebview). */
+        /* Explanatory hints for chart and axis titles, and for any element's
+           title attribute (pywebview doesn't show native title tooltips). */
         (function () {
             var HINTS = {
                 'chart-daily-reviews': {
@@ -510,7 +509,12 @@ INDEX_STRING = '''
             hint.hidden = true;
             document.body.appendChild(hint);
             document.addEventListener('pointermove', function (e) {
-                var tagged = e.target.closest('[data-hint]');
+                // Take the title over, so browsers don't show both tooltips
+                var tagged = e.target.closest('[title], [data-hint]');
+                if (tagged && tagged.title) {
+                    tagged.dataset.hint = tagged.title;
+                    tagged.removeAttribute('title');
+                }
                 var label = e.target.closest('.gtitle, .xtitle, .ytitle');
                 var graph = label && label.closest('.dash-graph');
                 var tips = graph && HINTS[graph.id];
