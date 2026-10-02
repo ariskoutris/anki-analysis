@@ -38,10 +38,28 @@ def _segmented(component_id, options, value=None):
     )
 
 
+# Charts the Range filter doesn't apply to, with the period they show instead
+_RANGE_EXEMPT = {
+    'chart-future-load': 'Next 365d',
+    'chart-retrievability-dist': 'Now',
+    'chart-stability-dist': 'Now',
+    'chart-difficulty-dist': 'Now',
+    'chart-lapse-load': 'Now',
+    'chart-retention-workload': 'Now',
+    'chart-calibration': 'All time',
+    'chart-fatigue': 'All time',
+}
+
+
 def _grid_panel(chart_id, width):
     """One chart in the grid, with a move grip and a right-edge resize handle."""
+    tag = _RANGE_EXEMPT.get(chart_id)
     return html.Div([
-        html.Div('⠿', className='grid-panel__grip', title='Drag to move'),
+        html.Div([
+            tag and html.Span(tag, className='grid-panel__tag', **{
+                'data-hint': 'The Range filter doesn’t apply to this chart'}),
+            html.Span('⠿', className='grid-panel__grip', title='Drag to move'),
+        ], className='grid-panel__corner'),
         dcc.Graph(id=chart_id, config={'displayModeBar': False}, responsive=True,
                   style={'height': '100%', **DARK_BG}),
         html.Div(className='grid-panel__resize', title='Drag to resize'),
@@ -114,6 +132,9 @@ def create_main_layout():
         # Hidden stores
         dcc.Location(id='url', refresh=True),
         dcc.Store(id='backup-refresh-token', data=0, storage_type='memory'),
+        # Background sync and day rollover: poll for new data every minute
+        dcc.Store(id='data-version', storage_type='memory'),
+        dcc.Interval(id='data-poll', interval=60_000),
 
         html.Div([
             # ── Top Bar ──
@@ -186,7 +207,8 @@ def create_main_layout():
                 ], id='ankiweb-login', className='login-panel', style={'display': 'none'}),
 
                 # Toast status message
-                html.Div(id='upload-status-message', className='toast-msg', style={'display': 'none'}),
+                html.Div(id='upload-status-message', className='toast-msg', style={'display': 'none'},
+                         title='Click to dismiss'),
                 dcc.Interval(
                     id='upload-message-interval',
                     interval=2000, n_intervals=0, max_intervals=1, disabled=True,
@@ -217,6 +239,8 @@ def create_main_layout():
             # ── Chart Grid (movable / resizable, see assets/grid.js) ──
             html.Div([_grid_panel(cid, w) for cid, w in DEFAULT_GRID],
                      id='chart-grid', className='chart-grid'),
+            # Shown by grid.js once the layout differs from the default
+            html.Button('Reset chart layout', id='grid-reset', className='grid-reset', hidden=True),
 
             # ── Forecast Simulator ──
             create_simulator_section(),

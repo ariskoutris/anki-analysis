@@ -2,7 +2,8 @@
    its width (1-3 columns). The layout is a list of {id, w} in display order,
    rendered with CSS grid `order` + `grid-column: span` (the DOM is never
    reordered, so React's tree stays intact) and saved to localStorage.
-   Charts resize themselves via the ResizeObserver in the index template. */
+   dcc.Graph resizes each chart with its panel. The #grid-reset button
+   (shown once the layout is customised) restores the defaults. */
 (function () {
     var KEY = 'ankidash-grid', COLS = 3;
 
@@ -10,10 +11,13 @@
         return Array.prototype.filter.call(grid.children, function (p) { return p.dataset.id; });
     }
 
+    function defaults(grid) {
+        return panels(grid).map(function (p) { return {id: p.dataset.id, w: +p.dataset.w}; });
+    }
+
     function load(grid) {
-        var defaults = panels(grid).map(function (p) { return {id: p.dataset.id, w: +p.dataset.w}; });
         var known = {}, seen = {}, state = [], saved = [];
-        defaults.forEach(function (d) { known[d.id] = true; });
+        defaults(grid).forEach(function (d) { known[d.id] = true; });
         try { saved = JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) {}
         saved.forEach(function (s) {
             if (s && known[s.id] && !seen[s.id]) {
@@ -21,7 +25,7 @@
                 state.push({id: s.id, w: Math.min(COLS, Math.max(1, s.w | 0))});
             }
         });
-        defaults.forEach(function (d) { if (!seen[d.id]) { state.push(d); } });
+        defaults(grid).forEach(function (d) { if (!seen[d.id]) { state.push(d); } });
         return state;
     }
 
@@ -44,11 +48,20 @@
             byId[s.id].style.order = i;
             byId[s.id].style.gridColumn = 'span ' + spans[i];
         });
+        var reset = document.getElementById('grid-reset');
+        if (reset) { reset.hidden = JSON.stringify(state) === JSON.stringify(defaults(grid)); }
     }
 
     function init(grid) {
         var state = load(grid);
         apply(grid, state);
+
+        document.addEventListener('click', function (e) {
+            if (!e.target.closest('#grid-reset')) { return; }
+            state = defaults(grid);
+            try { localStorage.removeItem(KEY); } catch (e) {}
+            apply(grid, state);
+        });
 
         grid.addEventListener('pointerdown', function (e) {
             var grip = e.target.closest('.grid-panel__grip');

@@ -144,6 +144,10 @@ INDEX_STRING = '''
                 color: #fff; cursor: pointer;
             }
             .top-bar__btn:hover { filter: brightness(1.1); }
+            .top-bar__btn:disabled, .sim-run-btn:disabled { opacity: 0.6; cursor: progress; filter: none; }
+            #last-sync-indicator { font-variant-numeric: tabular-nums; }
+            .top-bar__btn--sync:disabled { animation: busy-pulse 1s ease-in-out infinite alternate; }
+            @keyframes busy-pulse { from { opacity: 0.9; } to { opacity: 0.4; } }
             .top-bar__btn--sync { background: #2dd4a8; }
             .top-bar__btn--upload { background: #5b8dff; }
 
@@ -210,9 +214,17 @@ INDEX_STRING = '''
                 gap: 8px;
             }
             .grid-panel { position: relative; min-width: 0; }
+            .grid-panel__corner {
+                position: absolute; top: 3px; right: 18px; z-index: 2;
+                display: flex; align-items: center; gap: 4px;
+            }
+            .grid-panel__tag {
+                padding: 1px 6px; border: 1px solid #2a2d3a; border-radius: 3px;
+                font-size: 10px; color: #8b8fa3; cursor: help; user-select: none;
+                pointer-events: all;
+            }
             .grid-panel__grip {
-                position: absolute; top: 3px; right: 18px;
-                z-index: 2; padding: 0 10px; border-radius: 3px;
+                padding: 0 10px; border-radius: 3px;
                 font-size: 12px; color: #5a5e72; cursor: grab;
                 user-select: none; touch-action: none;
                 opacity: 0; transition: opacity 0.15s;
@@ -233,6 +245,13 @@ INDEX_STRING = '''
             .grid-panel.is-resizing .grid-panel__resize::after { opacity: 1; }
             .grid-panel.is-moving { outline: 1px dashed #5b8dff; }
             body.grid-busy { user-select: none; }
+            .grid-reset {
+                display: block; margin: 6px 0 0 auto; padding: 2px 4px;
+                background: none; border: none; font: inherit; font-size: 11px;
+                color: #8b8fa3; cursor: pointer;
+            }
+            .grid-reset:hover { color: #e0e0e0; text-decoration: underline; }
+            .grid-reset[hidden] { display: none; }
             .dash-graph .gtitle, .dash-graph .xtitle, .dash-graph .ytitle {
                 pointer-events: all; cursor: help;
             }
@@ -288,6 +307,7 @@ INDEX_STRING = '''
                 max-width: 360px;
                 box-shadow: 0 4px 12px rgba(0,0,0,0.5);
             }
+            .toast-msg__close { margin-left: 10px; font-size: 14px; line-height: 1; opacity: 0.7; }
 
             /* AnkiWeb login panel */
             .login-panel {
@@ -396,7 +416,8 @@ INDEX_STRING = '''
             {%renderer%}
         </footer>
         <script>
-        /* Explanatory hints for chart and axis titles. */
+        /* Explanatory hints for chart and axis titles, and any element with a
+           data-hint attribute (native title tooltips don't show in pywebview). */
         (function () {
             var HINTS = {
                 'chart-daily-reviews': {
@@ -489,12 +510,13 @@ INDEX_STRING = '''
             hint.hidden = true;
             document.body.appendChild(hint);
             document.addEventListener('pointermove', function (e) {
+                var tagged = e.target.closest('[data-hint]');
                 var label = e.target.closest('.gtitle, .xtitle, .ytitle');
                 var graph = label && label.closest('.dash-graph');
                 var tips = graph && HINTS[graph.id];
                 var key = label && (label.classList.contains('gtitle') ? 'title'
                     : label.classList.contains('xtitle') ? 'x' : 'y');
-                var message = tips && tips[key];
+                var message = tagged ? tagged.dataset.hint : tips && tips[key];
                 hint.hidden = !message;
                 if (!message) return;
                 hint.textContent = message;

@@ -10,7 +10,7 @@ import time
 from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Input, Output, State, callback, no_update
+from dash import Input, Output, State, callback, html, no_update
 
 from .config import DATA_DIR
 from .constants import COLORS, DARK_CHART_LAYOUT
@@ -55,6 +55,8 @@ from .data_loader import (
     get_load_by_introduction,
     get_session_dates,
     get_lapse_load,
+    get_deck_list,
+    data_version,
 )
 from .fsrs_engine import (
     get_known_words_timeseries,
@@ -88,16 +90,39 @@ def _toast(color, bg):
 
 
 _TOAST_SUCCESS = _toast(COLORS['success'], '#162312')
-_TOAST_ERROR = _toast(COLORS['danger'], '#2a1215')
+_TOAST_ERROR = {**_toast(COLORS['danger'], '#2a1215'), 'cursor': 'pointer'}
 
 
-_EMPTY_FIG = go.Figure(layout=dict(
-    plot_bgcolor=DARK_CHART_LAYOUT['plot_bgcolor'],
-    paper_bgcolor=DARK_CHART_LAYOUT['paper_bgcolor'],
-    xaxis=dict(visible=False), yaxis=dict(visible=False),
-    annotations=[dict(text='No data', xref='paper', yref='paper', x=0.5, y=0.5,
-                      showarrow=False, font=dict(size=14, color=COLORS['text_muted']))],
-))
+def _ok(message):
+    """Toast outputs (text, style, timer disabled, timer count); hides after 2s."""
+    return message, _TOAST_SUCCESS, False, 0
+
+
+def _error(message):
+    """Like _ok, but stays until clicked, so there's time to read it."""
+    return [message, html.Span('×', className='toast-msg__close')], _TOAST_ERROR, True, 0
+
+
+def _empty_fig(title, message):
+    return go.Figure(layout=dict(
+        **DARK_CHART_LAYOUT, title=title,
+        xaxis=dict(visible=False), yaxis=dict(visible=False),
+        annotations=[dict(text=message, xref='paper', yref='paper', x=0.5, y=0.5,
+                          showarrow=False, font=dict(size=13, color=COLORS['text_muted']))],
+    ))
+
+
+def _no_reviews(review_days):
+    """Empty-chart message for a chart that follows the Range filter."""
+    if review_days is None:
+        return 'No reviews in this deck yet'
+    return f'No reviews in the last {review_days} days<br>Try a longer range'
+
+
+def _or_empty(*charts):
+    """(figure, title, message) -> figures, each with nothing to plot swapped for the message."""
+    return tuple(fig if fig is not None and fig.data else _empty_fig(title, msg)
+                 for fig, title, msg in charts)
 
 
 def _dates_as_ms(*figs):
@@ -209,7 +234,7 @@ def handle_backup_upload(contents, filename):
         return "", {'display': 'none'}, False, 0, no_update
 
     if not filename or not filename.lower().endswith('.apkg'):
-        return "Invalid file format. Upload an .apkg file.", _TOAST_ERROR, False, 0, no_update
+        return _error("Invalid file format. Upload an .apkg file.") + (no_update,)
 
     try:
         content_type, content_string = contents.split(',')
@@ -218,12 +243,11 @@ def handle_backup_upload(contents, filename):
         success, message = process_apkg_upload(file_bytes, DATA_DIR)
 
         if success:
-            return message, _TOAST_SUCCESS, False, 0, time.time()
-        else:
-            return message, _TOAST_ERROR, False, 0, no_update
+            return _ok(message) + (time.time(),)
+        return _error(message) + (no_update,)
 
     except Exception as e:
-        return f"Upload error: {str(e)}", _TOAST_ERROR, False, 0, no_update
+        return _error(f"Upload error: {str(e)}") + (no_update,)
 
 
 # ---------------------------------------------------------------------------
@@ -239,8 +263,8 @@ def _sync_outputs():
     success, message = sync_from_ankiweb(DATA_DIR)
     login_style = _LOGIN_HIDDEN if is_logged_in(DATA_DIR) else _LOGIN_SHOWN
     if success:
-        return message, _TOAST_SUCCESS, False, 0, time.time(), login_style
-    return message, _TOAST_ERROR, False, 0, no_update, login_style
+        return _ok(message) + (time.time(), login_style)
+    return _error(message) + (no_update, login_style)
 
 
 _SYNC_OUTPUTS = [
@@ -257,6 +281,9 @@ _SYNC_OUTPUTS = [
     _SYNC_OUTPUTS,
     [Input('sync-from-anki-button', 'n_clicks')],
     [State('ankiweb-login', 'style')],
+    # Same label while busy (a longer one would shift the top bar); CSS pulses it
+    running=[(Output('sync-from-anki-button', 'disabled'), True, False),
+             (Output('sync-from-anki-button', 'title'), 'Syncing…', 'Sync from AnkiWeb')],
     prevent_initial_call=True
 )
 def handle_anki_sync(n_clicks, login_style):
@@ -275,16 +302,18 @@ def handle_anki_sync(n_clicks, login_style):
      Input('ankiweb-password', 'n_submit')],
     [State('ankiweb-email', 'value'),
      State('ankiweb-password', 'value')],
+    running=[(Output('ankiweb-login-button', 'disabled'), True, False),
+             (Output('ankiweb-login-button', 'children'), 'Logging in…', 'Log in and sync')],
     prevent_initial_call=True
 )
 def handle_ankiweb_login(_clicks, _submits, email, password):
     """Log in to AnkiWeb (stores only the sync key), then sync."""
     if not email or not password:
-        return "Enter your AnkiWeb email and password.", _TOAST_ERROR, False, 0, no_update, no_update, no_update
+        return _error("Enter your AnkiWeb email and password.") + (no_update,) * 3
     try:
         login(DATA_DIR, email.strip(), password)
     except SyncError as e:
-        return f"AnkiWeb login failed: {e}", _TOAST_ERROR, False, 0, no_update, no_update, ''
+        return _error(f"AnkiWeb login failed: {e}") + (no_update, no_update, '')
     return _sync_outputs() + ('',)
 
 
@@ -296,9 +325,10 @@ def handle_ankiweb_login(_clicks, _submits, email, password):
     [Output('last-sync-indicator', 'children'),
      Output('last-sync-indicator', 'title')],
     [Input('backup-refresh-token', 'data'),
-     Input('url', 'pathname')],
+     Input('url', 'pathname'),
+     Input('data-poll', 'n_intervals')],
 )
-def update_last_sync_indicator(_refresh_token, _url):
+def update_last_sync_indicator(_refresh_token, _url, _poll):
     """Show when the last successful AnkiWeb sync happened (uploads don't count)."""
     ts = get_last_sync_time(DATA_DIR)
     if ts is None:
@@ -328,10 +358,54 @@ def update_last_sync_indicator(_refresh_token, _url):
     prevent_initial_call=True
 )
 def auto_dismiss_upload_message(n):
-    """Hide the upload status message after 3 seconds."""
+    """Hide a success message after 2 seconds."""
     if not n:
         return no_update, no_update
     return {'display': 'none'}, True
+
+
+@callback(
+    Output('upload-status-message', 'style', allow_duplicate=True),
+    Input('upload-status-message', 'n_clicks'),
+    prevent_initial_call=True
+)
+def dismiss_message_on_click(_n):
+    return {'display': 'none'}
+
+
+# ---------------------------------------------------------------------------
+# Callbacks: Pick up new data (background sync, day rollover)
+# ---------------------------------------------------------------------------
+
+@callback(
+    Output('data-version', 'data'),
+    Input('backup-refresh-token', 'data'),
+)
+def record_data_version(_refresh_token):
+    """The data version the page is showing (set on load and every refresh)."""
+    return data_version()
+
+
+@callback(
+    Output('backup-refresh-token', 'data', allow_duplicate=True),
+    Input('data-poll', 'n_intervals'),
+    State('data-version', 'data'),
+    prevent_initial_call=True
+)
+def refresh_on_new_data(_n, shown):
+    """Refresh the page's data when a background sync or Anki's new day changed it."""
+    return time.time() if data_version() != shown else no_update
+
+
+@callback(
+    Output('deck-filter', 'options'),
+    Input('backup-refresh-token', 'data'),
+    prevent_initial_call=True
+)
+def update_deck_options(_refresh_token):
+    """Re-read the deck list after a sync or upload (decks may be added or renamed)."""
+    return [{'label': 'All Decks', 'value': 'all'}] + [
+        {'label': d['name'], 'value': str(d['id'])} for d in get_deck_list()]
 
 
 # ---------------------------------------------------------------------------
@@ -411,15 +485,22 @@ def update_session_charts(time_range, xaxis_mode, _refresh_token, deck_value):
     forecast_df = get_future_load_forecast(forecast_days, deck_id=deck_id)
 
     if session_df.empty:
-        return (_EMPTY_FIG,) * 5
-
-    fig_daily = create_daily_reviews_chart(daily_df, use_sessions=use_sessions)
-    fig_hourly = create_hourly_chart(hourly_df)
-    fig_recall = create_success_rate_chart(session_df, use_sessions=use_sessions)
-    fig_speed = create_efficiency_chart(session_df, use_sessions=use_sessions)
+        fig_daily = fig_hourly = fig_recall = fig_speed = None
+    else:
+        fig_daily = create_daily_reviews_chart(daily_df, use_sessions=use_sessions)
+        fig_hourly = create_hourly_chart(hourly_df)
+        fig_recall = create_success_rate_chart(session_df, use_sessions=use_sessions)
+        fig_speed = create_efficiency_chart(session_df, use_sessions=use_sessions)
     fig_forecast = create_future_load_chart(forecast_df, days_ahead=forecast_days)
 
-    return _dates_as_ms(fig_daily, fig_hourly, fig_recall, fig_speed, fig_forecast)
+    no_reviews = _no_reviews(review_days)
+    return _dates_as_ms(*_or_empty(
+        (fig_daily, 'Daily Reviews', no_reviews),
+        (fig_hourly, 'Hourly Performance', no_reviews),
+        (fig_recall, 'Recall Rate', no_reviews),
+        (fig_speed, 'Review Speed', no_reviews),
+        (fig_forecast, 'Upcoming Reviews', 'Nothing due in the next year'),
+    ))
 
 
 # ---------------------------------------------------------------------------
@@ -453,6 +534,16 @@ def update_card_charts(_refresh_token, deck_value, time_range, xaxis_mode):
     return _card_charts(deck_value, time_range, xaxis_mode)
 
 
+# The card callback's charts in output order: (title, follows the Range filter)
+_CARD_CHARTS = [
+    ('Known Cards', True), ('FSRS Calibration', False),
+    ('Retrievability Distribution', False), ('Stability Distribution', False),
+    ('Difficulty Distribution', False), ('Retention ⇄ Workload Tradeoff', False),
+    ('Load by Introduction', True), ('Session Fatigue', False),
+    ('Load Trend', True), ('Lapse Load', False),
+]
+
+
 @per_db
 def _card_charts(deck_value, time_range, xaxis_mode):
     """The card chart figures (cached; kept apart from the last-view write)."""
@@ -464,7 +555,8 @@ def _card_charts(deck_value, time_range, xaxis_mode):
     cards_df = get_card_data(deck_id=deck_id)
 
     if cards_df.empty:
-        return (_EMPTY_FIG,) * 10
+        return _or_empty(*((None, title, 'No review cards in this deck yet')
+                           for title, _ in _CARD_CHARTS))
 
     session_dates = get_session_dates(deck_id=deck_id)
 
@@ -502,6 +594,9 @@ def _card_charts(deck_value, time_range, xaxis_mode):
     fig_lapse_load = create_lapse_load_chart(
         get_lapse_load(deck_id=deck_id))
 
-    return _dates_as_ms(fig_known, fig_calib, fig_ret, fig_stab, fig_diff,
-                        fig_retention, fig_load_intro, fig_fatigue, fig_load_trend,
-                        fig_lapse_load)
+    figs = (fig_known, fig_calib, fig_ret, fig_stab, fig_diff,
+            fig_retention, fig_load_intro, fig_fatigue, fig_load_trend, fig_lapse_load)
+    no_reviews = _no_reviews(review_days)
+    return _dates_as_ms(*_or_empty(*(
+        (fig, title, no_reviews if ranged else 'Not enough reviews yet')
+        for fig, (title, ranged) in zip(figs, _CARD_CHARTS))))

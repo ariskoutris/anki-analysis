@@ -433,10 +433,24 @@ def get_lapse_load(deck_id: int | None = None) -> pd.DataFrame:
             .reset_index().sort_values('lapses').reset_index(drop=True))
 
 
+@per_db
 def get_rollover_hour() -> int:
     """Anki's day-rollover hour (reviews before it belong to the previous day)."""
     with open_collection() as col:
         return int(col.get_config('rollover', 4))
+
+
+def data_version() -> list | None:
+    """
+    Changes when anki.db is swapped in (sync, upload) or Anki's day rolls
+    over; the page polls it to know when to refresh. None before the first sync.
+    """
+    try:
+        inode = os.stat(get_db_path()).st_ino
+        day = (datetime.now() - timedelta(hours=get_rollover_hour())).date()
+    except OSError:
+        return None
+    return [inode, day.isoformat()]
 
 
 def get_current_streak(deck_id: int | None = None) -> int:

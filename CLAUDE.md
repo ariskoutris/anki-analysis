@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Interactive Plotly Dash dashboard for analysing Anki flashcard reviews on FSRS-enabled decks. Auto-syncs from AnkiWeb on startup (once logged in); also supports manual sync and .apkg upload.
+Interactive Plotly Dash dashboard for analysing Anki flashcard reviews on FSRS-enabled decks. Syncs from AnkiWeb in the background (at startup, then every 30 min, once logged in); also supports manual sync and .apkg upload. The page polls for new data and refreshes itself.
 
 ## File map
 
@@ -14,13 +14,13 @@ src/
   config.py                 – Project root + single DB path (data/anki.db)
   constants.py              – COLORS, DARK_CHART_LAYOUT, INDEX_STRING (HTML/CSS template)
   layout.py                 – create_stat_card, create_section_container, tab builders, create_main_layout
-  assets/grid.js            – Chart grid move/resize (plain CSS grid, order + widths in localStorage)
+  assets/grid.js            – Chart grid move/resize (plain CSS grid, order + widths in localStorage); shows/handles the #grid-reset button
   assets/plotly-cartesian.min.js – plotly.js cartesian build, served instead of Dash's full bundle (app.py drops it from `dcc._js_dist`); must match `plotly.offline.get_plotlyjs_version()`, so replace it when upgrading plotly
   callbacks.py              – All @callback functions + parse_time_range
   charts_session.py         – 5 session chart functions + session-mode helpers
   charts_card.py            – 9 card/analytics chart functions (pure: DataFrame → Figure)
   upload_handler.py         – .apkg file upload processing
-  anki_sync.py              – AnkiWeb login + full download → data/anki.db via the `anki` package (skipped when `sync_status` on the current anki.db reports no changes); sync key in data/ankiweb.json, last successful sync in data/last_sync.json (`get_last_sync_time()`)
+  anki_sync.py              – AnkiWeb login + full download → data/anki.db via the `anki` package (skipped when `sync_status` on the current anki.db reports no changes; a lock keeps the background and button syncs apart); sync key in data/ankiweb.json, last successful sync in data/last_sync.json (`get_last_sync_time()`)
   data_loader.py            – All SQL queries, FSRS calculations, DataFrame construction, summary stats
   fsrs_engine.py            – FSRS analytics on Anki's backend (`anki` package) (see below)
 pyproject.toml              – Project metadata + dependencies (numpy, zstandard, pandas, dash, plotly, pywebview, anki); managed with uv
@@ -38,7 +38,7 @@ data/                       – Not tracked. Contains single anki.db snapshot
 ```
 .apkg file → upload via UI → data/anki.db
    or
-AnkiWeb → auto-sync on startup / Sync button → data/anki.db
+AnkiWeb → background sync / Sync button → data/anki.db
                                    ↓
                             src/data_loader.py   (SQL → pandas DataFrames)
                                    ↓
@@ -92,6 +92,7 @@ Data layer. Plain SQL goes through `connect_db()` (sqlite3); anything Anki compu
 - `get_current_streak()` – consecutive study days (Anki rollover hour)
 - `get_session_summary_stats()` – current streak + avg recall rate (stat strip)
 - `get_workload_summary()` – due this week (today included), overdue cards, both from `future_due`
+- `data_version()` – [anki.db inode, Anki's current day]; the page polls it to know when to refresh
 **Key SQL conventions:**
 - `r.type != 4` excludes manual reschedules
 - `c.queue != -1` excludes suspended cards
@@ -147,7 +148,8 @@ Layout builders:
 - `create_session_tab()` – session tab layout with 3 sections (volume, effectiveness, workload)
 - `create_cards_tab()` – card tab layout with 3 sections (knowledge, maturity, problems)
 - `_segmented(id, options)` – top-bar toggle (Range, X-axis, Load): `dcc.RadioItems` styled by the `.segmented` CSS class, value remembered via Dash `persistence` (deck dropdown too); no callbacks needed
-- `create_main_layout()` – assembles the full page layout (top bar includes the `last-sync-indicator` span next to Sync/Upload, plus the hidden `ankiweb-login` panel)
+- `_grid_panel(id, width)` – grid chart panel; charts the Range filter doesn't apply to (`_RANGE_EXEMPT`) get a corner tag ("Now", "All time", "Next 365d")
+- `create_main_layout()` – assembles the full page layout (top bar includes the `last-sync-indicator` span next to Sync/Upload, plus the hidden `ankiweb-login` panel; `data-poll` interval + `data-version` store; `grid-reset` button under the grid)
 
 ### charts_session.py
 
@@ -162,30 +164,33 @@ Card chart builders (4 pure functions – DataFrame in, Figure out):
 
 ### callbacks.py
 
-All `@callback` functions + `parse_time_range` utility. The chart callbacks' figures are cached with `per_db` too (`update_card_charts` writes data/last_view.json, then calls the cached `_card_charts`):
+All `@callback` functions + `parse_time_range` utility. The chart callbacks' figures are cached with `per_db` too (`update_card_charts` writes data/last_view.json, then calls the cached `_card_charts`). Charts with nothing to plot become a titled message via `_or_empty` (e.g. "No reviews in the last 7 days"). Toasts come from `_ok` (hides after 2s) / `_error` (stays until clicked):
 
 | Callback | Trigger | Output |
 |----------|---------|--------|
 | `update_overview_container` | `backup-refresh-token` / `url` | Overview stat cards |
 | `handle_backup_upload` | upload button | Processes .apkg uploads → data/anki.db |
-| `handle_anki_sync` | sync button | Syncs from AnkiWeb → data/anki.db; toggles the login panel when not logged in |
+| `handle_anki_sync` | sync button | Syncs from AnkiWeb → data/anki.db (button disabled and pulsing via `running`, same label so the top bar doesn't shift); toggles the login panel when not logged in |
 | `handle_ankiweb_login` | login button / Enter in password | Stores AnkiWeb sync key, then syncs |
-| `update_last_sync_indicator` | `backup-refresh-token` / `url` | "Synced today HH:MM" / "Never synced" from data/last_sync.json (only successful Anki syncs, not uploads) |
-| `auto_dismiss_upload_message` | interval | Hides upload status after 2s |
+| `update_last_sync_indicator` | `backup-refresh-token` / `url` / `data-poll` | "Synced today HH:MM" / "Never synced" from data/last_sync.json (only successful Anki syncs, not uploads) |
+| `auto_dismiss_upload_message` | interval | Hides a success toast after 2s |
+| `dismiss_message_on_click` | toast click | Hides the toast |
+| `record_data_version` | `backup-refresh-token` | `data-version` store: the data the page shows |
+| `refresh_on_new_data` | `data-poll` (60s) | Bumps `backup-refresh-token` when `data_version()` changed (background sync, Anki day rollover) |
+| `update_deck_options` | `backup-refresh-token` | Re-reads the deck dropdown's options |
 | `update_session_charts` | time-range / xaxis-mode / refresh-token | Rebuilds all 3 session sections (summaries + charts) |
 | `update_card_charts` | retrievability / difficulty / refresh-token | Rebuilds all 3 card sections (summaries + charts) |
 
 ### app.py
 
 Slim orchestrator:
-1. Auto-sync from AnkiWeb (skips when not logged in or offline)
-2. `app = dash.Dash(...)` + `app.index_string = INDEX_STRING`
-3. `app.layout = create_main_layout()` (no arguments)
-4. Side-effect import of `callbacks` (registers all `@callback` decorators)
-5. Cache warm-up: calls the overview/session/card callbacks for the last-used view (data/last_view.json, written by `update_card_charts`), so the first page load hits the cache
-6. `if __name__ == '__main__'` entry point
+1. `app = dash.Dash(...)` + `app.index_string = INDEX_STRING`
+2. `app.layout = create_main_layout()` (no arguments)
+3. Side-effect import of `callbacks` (registers all `@callback` decorators)
+4. Cache warm-up (`_warm_up`): calls the overview/session/card callbacks for the last-used view (data/last_view.json, written by `update_card_charts`), so the first page load hits the cache. Then a daemon thread (`_sync_forever`) syncs from AnkiWeb now and every 30 min (skips when not logged in or offline), re-warming when the data changed
+5. `if __name__ == '__main__'` entry point
 
-**Critical ordering:** auto-sync → app creation → layout → callback import → warm-up (callbacks reference component IDs created in layout).
+**Critical ordering:** app creation → layout → callback import → warm-up → background sync (callbacks reference component IDs created in layout). The page shows the data already on disk while the sync runs.
 
 **Tab 1 – Study Sessions** (3 sections):
 

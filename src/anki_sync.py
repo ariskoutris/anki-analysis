@@ -11,6 +11,7 @@ import json
 import os
 import sqlite3
 import tempfile
+import threading
 import time
 from pathlib import Path
 from typing import Tuple, Optional
@@ -24,6 +25,9 @@ from .upload_handler import validate_database
 
 LAST_SYNC_FILE = "last_sync.json"
 AUTH_FILE = "ankiweb.json"
+
+# The background sync (app.py) and the Sync button must not download at once
+_sync_lock = threading.Lock()
 
 
 def is_logged_in(data_root: str) -> bool:
@@ -100,6 +104,11 @@ def sync_from_ankiweb(data_root: str) -> Tuple[bool, str]:
     if not is_logged_in(data_root):
         return False, "Log in to AnkiWeb to sync"
 
+    with _sync_lock:
+        return _sync(data_root)
+
+
+def _sync(data_root: str) -> Tuple[bool, str]:
     auth = SyncAuth(hkey=json.loads((Path(data_root) / AUTH_FILE).read_text())["hkey"])
     try:
         try:

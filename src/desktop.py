@@ -3,8 +3,8 @@
 Desktop entry point: runs the dashboard inside a native window (pywebview).
 
 The window opens immediately on a loading screen; the Dash app is imported
-(which triggers the AnkiWeb auto-sync) and served on a free local port in a
-background thread. Closing the window exits the process and the server with it.
+(which warms the cache and starts the background AnkiWeb sync) and served on
+a free local port in a background thread. Closing the window exits the process and the server with it.
 
 Run with:  uv run python -m src.desktop
 """
@@ -29,7 +29,7 @@ LOADING_HTML = f"""
   <div style="width:28px;height:28px;border:3px solid {COLORS['border']};
     border-top-color:{COLORS['primary']};border-radius:50%;
     animation:spin .8s linear infinite"></div>
-  <p style="margin-top:18px">Syncing from AnkiWeb and loading dashboard…</p>
+  <p style="margin-top:18px">Loading dashboard…</p>
   <style>@keyframes spin {{ to {{ transform: rotate(360deg) }} }}</style>
 </body></html>
 """
@@ -56,7 +56,7 @@ def _wait_for_server(port, timeout=60):
 def _start_dashboard(window):
     """Runs on pywebview's worker thread once the window is up."""
     try:
-        from .app import app  # slow: auto-sync + data layer imports
+        from .app import app  # slow: data layer imports + cache warm-up
 
         # Per-request access logs would grow the launcher's log file forever
         logging.getLogger('werkzeug').setLevel(logging.WARNING)
