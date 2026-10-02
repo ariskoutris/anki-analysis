@@ -7,6 +7,7 @@ Entry point: creates the Dash app, sets layout, and registers callbacks.
 import json
 import os
 import dash
+from dash import dcc
 
 from .constants import INDEX_STRING
 from .layout import create_main_layout
@@ -37,6 +38,12 @@ app = dash.Dash(
     meta_tags=[{"name": "viewport", "content": "width=device-width, initial-scale=1"}],
 )
 app.index_string = INDEX_STRING
+
+# Charts use only cartesian traces, so serve plotly.js's cartesian build
+# (assets/plotly-cartesian.min.js, 1.4 MB) instead of Dash's full 4.7 MB one.
+# dcc.Graph uses window.Plotly when it's already loaded. Keep the asset's
+# version in step with `plotly.offline.get_plotlyjs_version()`.
+dcc._js_dist[:] = [r for r in dcc._js_dist if r.get('namespace') != 'plotly']
 
 # ---------------------------------------------------------------------------
 # 3. Set layout

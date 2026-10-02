@@ -15,6 +15,7 @@ src/
   constants.py              – COLORS, DARK_CHART_LAYOUT, INDEX_STRING (HTML/CSS template)
   layout.py                 – create_stat_card, create_section_container, tab builders, create_main_layout
   assets/grid.js            – Chart grid move/resize (plain CSS grid, order + widths in localStorage)
+  assets/plotly-cartesian.min.js – plotly.js cartesian build, served instead of Dash's full bundle (app.py drops it from `dcc._js_dist`); must match `plotly.offline.get_plotlyjs_version()`, so replace it when upgrading plotly
   callbacks.py              – All @callback functions + parse_time_range
   charts_session.py         – 5 session chart functions + session-mode helpers
   charts_card.py            – 9 card/analytics chart functions (pure: DataFrame → Figure)
