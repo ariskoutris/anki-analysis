@@ -4,7 +4,6 @@ AnkiDash: interactive Anki learning dashboard
 Entry point: creates the Dash app, sets layout, and registers callbacks.
 """
 
-import json
 import os
 import threading
 import time
@@ -14,8 +13,8 @@ from dash import dcc
 from .constants import INDEX_STRING
 from .layout import create_main_layout
 from .anki_sync import sync_from_ankiweb
-from .config import DATA_DIR
-from .data_loader import data_version
+from .config import DATA_DIR, get_last_view
+from .data_loader import data_version, get_deck_list
 
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -39,7 +38,7 @@ dcc._js_dist[:] = [r for r in dcc._js_dist if r.get('namespace') != 'plotly']
 # ---------------------------------------------------------------------------
 # 2. Set layout
 # ---------------------------------------------------------------------------
-app.layout = create_main_layout()
+app.layout = create_main_layout
 
 # ---------------------------------------------------------------------------
 # 3. Register all callbacks (side-effect import)
@@ -56,14 +55,12 @@ SYNC_INTERVAL = 30 * 60  # seconds
 def _warm_up():
     """Compute the last-used view, so the page loads from the cache."""
     try:
-        try:
-            with open(callbacks.LAST_VIEW_FILE) as f:
-                deck, time_range, xaxis_mode = json.load(f)[:3]
-        except (OSError, ValueError):
-            deck, time_range, xaxis_mode = 'all', 'all', 'dates'
+        deck, time_range, xaxis_mode = get_last_view()
+        if deck != 'all' and deck not in {str(d['id']) for d in get_deck_list()}:
+            deck = 'all'
         callbacks.update_overview_container(0, '/', deck)
         callbacks.update_session_charts(time_range, xaxis_mode, 0, deck)
-        callbacks.update_card_charts(0, deck, time_range, xaxis_mode)
+        callbacks._card_charts(deck, time_range, xaxis_mode)
     except Exception as e:
         print(f"  Cache warm-up skipped: {e}")
 

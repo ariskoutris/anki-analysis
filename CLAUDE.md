@@ -147,7 +147,7 @@ Layout builders:
 - `create_section_container(title, description, content_id, summary_id)` – section wrapper with header and optional summary area
 - `create_session_tab()` – session tab layout with 3 sections (volume, effectiveness, workload)
 - `create_cards_tab()` – card tab layout with 3 sections (knowledge, maturity, problems)
-- `_segmented(id, options)` – top-bar toggle (Range, X-axis): `dcc.RadioItems` styled by the `.segmented` CSS class, value remembered via Dash `persistence` (deck dropdown too); no callbacks needed
+- `_segmented(id, options)` – top-bar toggle (Range, X-axis): `dcc.RadioItems` styled by the `.segmented` CSS class, value remembered via Dash `persistence`; the deck dropdown starts from `data/last_view.json`
 - `_grid_panel(id, width)` – grid chart panel; charts the Range filter doesn't apply to (`_RANGE_EXEMPT`) get a corner tag ("Now", "All time", "Next 365d")
 - `create_main_layout()` – assembles the full page layout (top bar includes the `last-sync-indicator` span next to Sync/Upload, plus the hidden `ankiweb-login` panel; `data-poll` interval + `data-version` store; `grid-reset` button under the grid)
 
@@ -185,9 +185,9 @@ All `@callback` functions + `parse_time_range` utility. The chart callbacks' fig
 
 Slim orchestrator:
 1. `app = dash.Dash(...)` + `app.index_string = INDEX_STRING`
-2. `app.layout = create_main_layout()` (no arguments)
+2. `app.layout = create_main_layout` (rebuilds on each page load so the saved deck is restored)
 3. Side-effect import of `callbacks` (registers all `@callback` decorators)
-4. Cache warm-up (`_warm_up`): calls the overview/session/card callbacks for the last-used view (data/last_view.json, written by `update_card_charts`), so the first page load hits the cache. Then a daemon thread (`_sync_forever`) syncs from AnkiWeb now and every 30 min (skips when not logged in or offline), re-warming when the data changed
+4. Cache warm-up (`_warm_up`): computes the overview/session callbacks and cached card charts for the last-used view (data/last_view.json, written by `update_card_charts`), so the first page load hits the cache without rewriting the saved view. Then a daemon thread (`_sync_forever`) syncs from AnkiWeb now and every 30 min (skips when not logged in or offline), re-warming when the data changed
 5. `if __name__ == '__main__'` entry point
 
 **Critical ordering:** app creation → layout → callback import → warm-up → background sync (callbacks reference component IDs created in layout). The page shows the data already on disk while the sync runs.

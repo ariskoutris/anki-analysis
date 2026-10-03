@@ -5,6 +5,7 @@ Single-page dark Grafana-style grid layout.
 
 from dash import dcc, html
 
+from .config import get_last_view
 from .constants import COLORS
 from .data_loader import get_deck_list
 from .charts_card import create_sim_memorized_chart, create_sim_reviews_chart
@@ -128,6 +129,11 @@ def create_stat_item(value, label, color=COLORS['text_primary'], secondary=False
 def create_main_layout():
     """Assemble the full single-page grid layout."""
 
+    saved_deck = get_last_view()[0]
+    decks = get_deck_list()
+    if saved_deck != 'all' and saved_deck not in {str(d['id']) for d in decks}:
+        saved_deck = 'all'
+
     return html.Div([
         # Hidden stores
         dcc.Location(id='url', refresh=True),
@@ -168,10 +174,9 @@ def create_main_layout():
                             id='deck-filter',
                             options=[{'label': 'All Decks', 'value': 'all'}] + [
                                 {'label': d['name'], 'value': str(d['id'])}
-                                for d in get_deck_list()
+                                for d in decks
                             ],
-                            value='all',
-                            persistence=True, persistence_type='local',
+                            value=saved_deck,
                             clearable=False,
                             style={'width': '200px'},
                         ),

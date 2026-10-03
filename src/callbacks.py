@@ -5,14 +5,13 @@ All @callback decorators register against the global Dash app instance.
 
 import base64
 import json
-import os
 import time
 from datetime import datetime
 import pandas as pd
 import plotly.graph_objects as go
 from dash import Input, Output, State, callback, html, no_update
 
-from .config import DATA_DIR
+from .config import DATA_DIR, LAST_VIEW_FILE
 from .constants import COLORS, DARK_CHART_LAYOUT
 from .upload_handler import process_apkg_upload
 from anki.errors import SyncError
@@ -68,9 +67,6 @@ from .fsrs_engine import (
     get_true_retention,
     get_deck_sim_defaults,
 )
-
-
-LAST_VIEW_FILE = os.path.join(DATA_DIR, 'last_view.json')
 
 
 def parse_time_range(time_range):
